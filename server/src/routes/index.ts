@@ -8,6 +8,7 @@ import freshStartRoutes from './freshStart.routes.js';
 import interviewRoutes from './interview.routes.js';
 import backupRoutes from './backup.routes.js';
 import statsRoutes from './stats.routes.js';
+import plannerRoutes from './planner.routes.js';
 
 const apiRouter = Router();
 
@@ -30,6 +31,7 @@ apiRouter.use('/fresh-start', freshStartRoutes);
 apiRouter.use('/interview', interviewRoutes);
 apiRouter.use('/backup', backupRoutes);
 apiRouter.use('/stats', statsRoutes);
+apiRouter.use('/planner', plannerRoutes);
 
 export default apiRouter;
 

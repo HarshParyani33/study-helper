@@ -18,6 +18,10 @@ const PAGE_META: Record<PageId, { title: string; description: string }> = {
     title: 'Knowledge Overview',
     description: 'Autonomous spaced repetition tracking and subject health.',
   },
+  planner: {
+    title: 'Study Planner',
+    description: 'Shared 10-day preparation roadmap with dual-profile tracking, timetable, and DSA matrix.',
+  },
   recall: {
     title: 'Daily Recall Session',
     description: 'Active retrieval flashcards with AI answer analysis and FSRS scheduling.',

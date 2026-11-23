@@ -11,6 +11,7 @@ import { InterviewMode } from './pages/InterviewMode.js';
 import { SurpriseRecall } from './pages/SurpriseRecall.js';
 import { Analytics } from './pages/Analytics.js';
 import { SettingsBackup } from './pages/SettingsBackup.js';
+import { StudyPlanner } from './pages/StudyPlanner.js';
 import { api } from './services/api.js';
 import { Subject } from './types/index.js';
 
@@ -71,6 +72,10 @@ export const App: React.FC = () => {
               onNavigate={handleNavigate}
               onRefreshDue={loadGlobalData}
             />
+          )}
+
+          {currentPage === 'planner' && (
+            <StudyPlanner onNavigateToRecall={() => handleNavigate('recall')} />
           )}
 
           {currentPage === 'recall' && (

@@ -12,10 +12,12 @@ import {
   Database,
   ChevronRight,
   Layers,
+  CalendarRange,
 } from 'lucide-react';
 
 export type PageId =
   | 'dashboard'
+  | 'planner'
   | 'recall'
   | 'ingest'
   | 'graph'
@@ -35,6 +37,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate, dueCount = 0 }) => {
   const navItems: { id: PageId; label: string; icon: any; badge?: number; group?: string }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'planner', label: 'Study Planner', icon: CalendarRange },
     { id: 'recall', label: 'Daily Recall', icon: Brain, badge: dueCount },
     { id: 'surprise', label: 'Surprise Recall', icon: Shuffle },
     { id: 'ingest', label: 'Ingestion Studio', icon: UploadCloud },

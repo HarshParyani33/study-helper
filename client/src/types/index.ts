@@ -155,3 +155,171 @@ export interface InterviewData {
   commonMisconceptions: { myth: string; reality: string; betterAnswer: string }[];
   revisionChecklist: { category: string; item: string; verified: boolean }[];
 }
+
+// ----------------------------------------------------
+// Study Planner Types
+// ----------------------------------------------------
+
+export interface StudyPlan {
+  _id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  defaultStartTime: string;
+  totalDays: number;
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ScoreBreakdown {
+  react: number;
+  dsa: number;
+  afternoon: number;
+  jobSearch: number;
+  notes: number;
+}
+
+export interface ProfileDailyProgress {
+  profileId: 'you' | 'girlfriend';
+  displayName: string;
+  color: 'blue' | 'pink';
+  score: number;
+  scoreBreakdown: ScoreBreakdown;
+  progress: {
+    reactCompleted: boolean;
+    dsaCompleted: boolean;
+    afternoonCompleted: boolean;
+    jobSearchCompleted: boolean;
+    jobSearchDetails?: {
+      targetRole?: string;
+      companyApplied?: string;
+      notes?: string;
+    };
+  };
+  dsa: {
+    topicId: string;
+    completedProblemNumbers: number[];
+    completedCount: number;
+  };
+}
+
+export interface TaskTimeSlot {
+  title: string;
+  category: 'react' | 'lunch' | 'dsa' | 'afternoon' | 'job_search' | 'personal';
+  startTime: string;
+  endTime: string;
+  durationMinutes: number;
+  description?: string;
+  link?: string;
+  episodeNumber?: number;
+  runtimeMinutes?: number;
+  totalStudyMinutes?: number;
+  activityName?: string;
+  note?: string;
+  isScored: boolean;
+  points: number;
+}
+
+export interface StudyNoteData {
+  _id: string;
+  planId: string;
+  date: string;
+  profileId: 'you' | 'girlfriend';
+  activityType: 'react' | 'dsa' | 'system-design' | 'project-learning' | 'job-search' | 'reflection';
+  title: string;
+  approach?: string;
+  observations?: string;
+  timeComplexity?: string;
+  spaceComplexity?: string;
+  content?: string;
+  isBookmarked?: boolean;
+  conceptId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DayStudyView {
+  plan: {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+    totalDays: number;
+    currentDayNumber: number;
+    isInPlanRange: boolean;
+  };
+  date: string;
+  overallProgress: {
+    you: { totalScore: number; maxScore: number; percentage: number };
+    girlfriend: { totalScore: number; maxScore: number; percentage: number };
+  };
+  timetable: TaskTimeSlot[];
+  startTime: string;
+  profiles: {
+    you: ProfileDailyProgress;
+    girlfriend: ProfileDailyProgress;
+  };
+  notes: StudyNoteData[];
+}
+
+export interface CalendarDayData {
+  date: string;
+  day: number;
+  dayNumber: number | null;
+  isInActivePlan: boolean;
+  you: {
+    score: number;
+    reactCompleted: boolean;
+    dsaQuestionsSolved: number;
+    afternoonCompleted: boolean;
+    jobSearchCompleted: boolean;
+    hasNotes: boolean;
+    hasActivity: boolean;
+  };
+  girlfriend: {
+    score: number;
+    reactCompleted: boolean;
+    dsaQuestionsSolved: number;
+    afternoonCompleted: boolean;
+    jobSearchCompleted: boolean;
+    hasNotes: boolean;
+    hasActivity: boolean;
+  };
+}
+
+export interface CalendarMonthData {
+  plan: {
+    id: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+    totalDays: number;
+  };
+  year: number;
+  month: number;
+  days: CalendarDayData[];
+}
+
+export interface DSAQuestion {
+  number: number;
+  title: string;
+  difficulty: 'Easy' | 'Medium' | 'Hard';
+  url: string;
+}
+
+export interface DSAPatternTopic {
+  id: string;
+  name: string;
+  description: string;
+  questions: DSAQuestion[];
+}
+
+export interface ReactEpisode {
+  day: number;
+  episodeNumber: number;
+  title: string;
+  runtimeMinutes: number;
+  totalStudyMinutes: number;
+  url: string;
+}

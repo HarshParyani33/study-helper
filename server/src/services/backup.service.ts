@@ -3,6 +3,11 @@ import { Source } from '../models/Source.js';
 import { Concept } from '../models/Concept.js';
 import { Question } from '../models/Question.js';
 import { Review } from '../models/Review.js';
+import { StudyPlan } from '../models/StudyPlan.js';
+import { StudyProfile } from '../models/StudyProfile.js';
+import { StudyDayProgress } from '../models/StudyDayProgress.js';
+import { DSASession } from '../models/DSASession.js';
+import { StudyNote } from '../models/StudyNote.js';
 
 export interface BackupData {
   version: string;
@@ -13,6 +18,11 @@ export interface BackupData {
     concepts: any[];
     questions: any[];
     reviews: any[];
+    studyPlans?: any[];
+    studyProfiles?: any[];
+    studyDayProgress?: any[];
+    dsaSessions?: any[];
+    studyNotes?: any[];
   };
   counts: {
     subjects: number;
@@ -20,6 +30,11 @@ export interface BackupData {
     concepts: number;
     questions: number;
     reviews: number;
+    studyPlans?: number;
+    studyProfiles?: number;
+    studyDayProgress?: number;
+    dsaSessions?: number;
+    studyNotes?: number;
   };
 }
 
@@ -33,6 +48,11 @@ export class BackupService {
     const concepts = await Concept.find().lean();
     const questions = await Question.find().lean();
     const reviews = await Review.find().lean();
+    const studyPlans = await StudyPlan.find().lean();
+    const studyProfiles = await StudyProfile.find().lean();
+    const studyDayProgress = await StudyDayProgress.find().lean();
+    const dsaSessions = await DSASession.find().lean();
+    const studyNotes = await StudyNote.find().lean();
 
     return {
       version: '1.0.0',
@@ -43,6 +63,11 @@ export class BackupService {
         concepts,
         questions,
         reviews,
+        studyPlans,
+        studyProfiles,
+        studyDayProgress,
+        dsaSessions,
+        studyNotes,
       },
       counts: {
         subjects: subjects.length,
@@ -50,6 +75,11 @@ export class BackupService {
         concepts: concepts.length,
         questions: questions.length,
         reviews: reviews.length,
+        studyPlans: studyPlans.length,
+        studyProfiles: studyProfiles.length,
+        studyDayProgress: studyDayProgress.length,
+        dsaSessions: dsaSessions.length,
+        studyNotes: studyNotes.length,
       },
     };
   }
@@ -68,9 +98,25 @@ export class BackupService {
       await Concept.deleteMany({});
       await Source.deleteMany({});
       await Subject.deleteMany({});
+      await StudyDayProgress.deleteMany({});
+      await DSASession.deleteMany({});
+      await StudyNote.deleteMany({});
+      await StudyProfile.deleteMany({});
+      await StudyPlan.deleteMany({});
     }
 
-    const { subjects, sources, concepts, questions, reviews } = backup.collections;
+    const {
+      subjects,
+      sources,
+      concepts,
+      questions,
+      reviews,
+      studyPlans,
+      studyProfiles,
+      studyDayProgress,
+      dsaSessions,
+      studyNotes,
+    } = backup.collections;
 
     if (subjects?.length) {
       for (const s of subjects) {
@@ -102,6 +148,37 @@ export class BackupService {
       }
     }
 
+    // Restore Planner collections if present
+    if (studyPlans?.length) {
+      for (const p of studyPlans) {
+        await StudyPlan.findByIdAndUpdate(p._id, p, { upsert: true, new: true });
+      }
+    }
+
+    if (studyProfiles?.length) {
+      for (const p of studyProfiles) {
+        await StudyProfile.findByIdAndUpdate(p._id, p, { upsert: true, new: true });
+      }
+    }
+
+    if (studyDayProgress?.length) {
+      for (const dp of studyDayProgress) {
+        await StudyDayProgress.findByIdAndUpdate(dp._id, dp, { upsert: true, new: true });
+      }
+    }
+
+    if (dsaSessions?.length) {
+      for (const ds of dsaSessions) {
+        await DSASession.findByIdAndUpdate(ds._id, ds, { upsert: true, new: true });
+      }
+    }
+
+    if (studyNotes?.length) {
+      for (const sn of studyNotes) {
+        await StudyNote.findByIdAndUpdate(sn._id, sn, { upsert: true, new: true });
+      }
+    }
+
     return {
       restoredAt: new Date().toISOString(),
       counts: {
@@ -110,8 +187,12 @@ export class BackupService {
         concepts: await Concept.countDocuments(),
         questions: await Question.countDocuments(),
         reviews: await Review.countDocuments(),
+        studyPlans: await StudyPlan.countDocuments(),
+        studyProfiles: await StudyProfile.countDocuments(),
+        studyDayProgress: await StudyDayProgress.countDocuments(),
+        dsaSessions: await DSASession.countDocuments(),
+        studyNotes: await StudyNote.countDocuments(),
       },
     };
   }
 }
-
