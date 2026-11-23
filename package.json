@@ -1,0 +1,26 @@
+{
+  "name": "personal-learning-os",
+  "version": "1.0.0",
+  "description": "Personal Learning OS - Persistent AI-assisted knowledge management & spaced repetition",
+  "scripts": {
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"blue,green\" \"npm run dev:server\" \"npm run dev:client\"",
+    "build": "cd server && npm run build && cd ../client && npm run build",
+    "test": "npx vitest run",
+    "verify": "tsx scripts/verify-phase7.ts",
+    "seed": "tsx scripts/seed-demo.ts",
+    "backup": "tsx scripts/export-backup.ts",
+    "restore": "tsx scripts/restore-backup.ts",
+    "ingest": "tsx scripts/import-knowledge.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5",
+    "mongodb-memory-server": "^11.3.0",
+    "mongoose": "^9.12.2",
+    "ts-fsrs": "^6.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
