@@ -452,12 +452,12 @@ export class PlannerService {
       totalPlannedFormatted: formatDuration(totalPlannedMinutes),
       currentActivity: currentActivity
         ? {
-            id: currentActivity.id,
-            name: currentActivity.name,
-            startTimeFormatted: currentActivity.startTimeFormatted,
-            endTimeFormatted: currentActivity.endTimeFormatted,
-            durationFormatted: currentActivity.durationFormatted,
-          }
+          id: currentActivity.id,
+          name: currentActivity.name,
+          startTimeFormatted: currentActivity.startTimeFormatted,
+          endTimeFormatted: currentActivity.endTimeFormatted,
+          durationFormatted: currentActivity.durationFormatted,
+        }
         : null,
       startTime: effectiveStartTime,
       profiles: {
