@@ -15,6 +15,7 @@ import {
   StudyNoteData,
   DSAPatternTopic,
   ReactEpisode,
+  ScheduleItemData,
 } from '../types/index.js';
 
 const BASE_URL = '/api/v1';
@@ -284,5 +285,77 @@ export const api = {
   },
   async getReactEpisodes(): Promise<ReactEpisode[]> {
     return request<ReactEpisode[]>('/planner/react/episodes');
+  },
+
+  // Live Timer API
+  async startTimer(data: {
+    planId: string;
+    date: string;
+    profileId: 'you' | 'girlfriend';
+    activityId: string;
+    activityName: string;
+  }): Promise<DayStudyView> {
+    return request<DayStudyView>('/planner/timer/start', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  async pauseTimer(timerId: string): Promise<DayStudyView> {
+    return request<DayStudyView>('/planner/timer/pause', {
+      method: 'POST',
+      body: JSON.stringify({ timerId }),
+    });
+  },
+  async resumeTimer(timerId: string): Promise<DayStudyView> {
+    return request<DayStudyView>('/planner/timer/resume', {
+      method: 'POST',
+      body: JSON.stringify({ timerId }),
+    });
+  },
+  async finishTimer(timerId: string): Promise<DayStudyView> {
+    return request<DayStudyView>('/planner/timer/finish', {
+      method: 'POST',
+      body: JSON.stringify({ timerId }),
+    });
+  },
+  async discardTimer(timerId: string): Promise<DayStudyView> {
+    return request<DayStudyView>('/planner/timer/discard', {
+      method: 'POST',
+      body: JSON.stringify({ timerId }),
+    });
+  },
+
+  // Schedule Spreadsheet Editor API
+  async getSchedule(planId?: string, dayNumber?: number): Promise<ScheduleItemData[]> {
+    const query = new URLSearchParams();
+    if (planId) query.append('planId', planId);
+    if (dayNumber) query.append('dayNumber', dayNumber.toString());
+    return request<ScheduleItemData[]>(`/planner/schedule?${query.toString()}`);
+  },
+  async updateSchedule(planId: string, dayNumber: number, items: ScheduleItemData[]): Promise<ScheduleItemData[]> {
+    return request<ScheduleItemData[]>('/planner/schedule', {
+      method: 'PUT',
+      body: JSON.stringify({ planId, dayNumber, items }),
+    });
+  },
+  async importSchedule(planId: string, dayNumber: number, csvContent: string): Promise<ScheduleItemData[]> {
+    return request<ScheduleItemData[]>('/planner/schedule/import', {
+      method: 'POST',
+      body: JSON.stringify({ planId, dayNumber, csvContent }),
+    });
+  },
+  async exportSchedule(planId?: string, dayNumber?: number): Promise<string> {
+    const query = new URLSearchParams();
+    if (planId) query.append('planId', planId);
+    if (dayNumber) query.append('dayNumber', dayNumber.toString());
+    const res = await fetch(`${BASE_URL}/planner/schedule/export?${query.toString()}`);
+    if (!res.ok) throw new Error('Failed to export schedule CSV');
+    return res.text();
+  },
+  async resetSchedule(planId: string, dayNumber: number): Promise<ScheduleItemData[]> {
+    return request<ScheduleItemData[]>('/planner/schedule/reset', {
+      method: 'POST',
+      body: JSON.stringify({ planId, dayNumber }),
+    });
   },
 };

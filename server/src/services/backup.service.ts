@@ -8,6 +8,8 @@ import { StudyProfile } from '../models/StudyProfile.js';
 import { StudyDayProgress } from '../models/StudyDayProgress.js';
 import { DSASession } from '../models/DSASession.js';
 import { StudyNote } from '../models/StudyNote.js';
+import { ActivityTimerSession } from '../models/ActivityTimerSession.js';
+import { StudyScheduleItem } from '../models/StudyScheduleItem.js';
 
 export interface BackupData {
   version: string;
@@ -23,6 +25,8 @@ export interface BackupData {
     studyDayProgress?: any[];
     dsaSessions?: any[];
     studyNotes?: any[];
+    activityTimerSessions?: any[];
+    studyScheduleItems?: any[];
   };
   counts: {
     subjects: number;
@@ -35,6 +39,8 @@ export interface BackupData {
     studyDayProgress?: number;
     dsaSessions?: number;
     studyNotes?: number;
+    activityTimerSessions?: number;
+    studyScheduleItems?: number;
   };
 }
 
@@ -53,6 +59,8 @@ export class BackupService {
     const studyDayProgress = await StudyDayProgress.find().lean();
     const dsaSessions = await DSASession.find().lean();
     const studyNotes = await StudyNote.find().lean();
+    const activityTimerSessions = await ActivityTimerSession.find().lean();
+    const studyScheduleItems = await StudyScheduleItem.find().lean();
 
     return {
       version: '1.0.0',
@@ -68,6 +76,8 @@ export class BackupService {
         studyDayProgress,
         dsaSessions,
         studyNotes,
+        activityTimerSessions,
+        studyScheduleItems,
       },
       counts: {
         subjects: subjects.length,
@@ -80,6 +90,8 @@ export class BackupService {
         studyDayProgress: studyDayProgress.length,
         dsaSessions: dsaSessions.length,
         studyNotes: studyNotes.length,
+        activityTimerSessions: activityTimerSessions.length,
+        studyScheduleItems: studyScheduleItems.length,
       },
     };
   }
@@ -116,6 +128,8 @@ export class BackupService {
       studyDayProgress,
       dsaSessions,
       studyNotes,
+      activityTimerSessions,
+      studyScheduleItems,
     } = backup.collections;
 
     if (subjects?.length) {
@@ -179,6 +193,18 @@ export class BackupService {
       }
     }
 
+    if (activityTimerSessions?.length) {
+      for (const ats of activityTimerSessions) {
+        await ActivityTimerSession.findByIdAndUpdate(ats._id, ats, { upsert: true, new: true });
+      }
+    }
+
+    if (studyScheduleItems?.length) {
+      for (const ssi of studyScheduleItems) {
+        await StudyScheduleItem.findByIdAndUpdate(ssi._id, ssi, { upsert: true, new: true });
+      }
+    }
+
     return {
       restoredAt: new Date().toISOString(),
       counts: {
@@ -192,6 +218,8 @@ export class BackupService {
         studyDayProgress: await StudyDayProgress.countDocuments(),
         dsaSessions: await DSASession.countDocuments(),
         studyNotes: await StudyNote.countDocuments(),
+        activityTimerSessions: await ActivityTimerSession.countDocuments(),
+        studyScheduleItems: await StudyScheduleItem.countDocuments(),
       },
     };
   }

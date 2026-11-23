@@ -9,6 +9,8 @@ import {
   DSAPatternTopic,
   ReactEpisode,
   Subject,
+  ScheduleItemData,
+  TaskTimeSlot,
 } from '../types/index.js';
 import {
   Calendar as CalendarIcon,
@@ -21,23 +23,24 @@ import {
   Plus,
   BookOpen,
   Sparkles,
-  User,
-  Heart,
   Briefcase,
   Code2,
   Video,
-  Trophy,
-  Flame,
-  Bookmark,
   Trash2,
   Edit3,
   Copy,
   Archive,
-  Layers,
   Play,
-  RotateCcw,
+  Pause,
+  Square,
   Check,
   AlertCircle,
+  Table,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface StudyPlannerProps {
@@ -62,6 +65,15 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Live Timer Ticker (1-second update for running stopwatches)
+  const [, setTicker] = useState<number>(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTicker(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // DSA Matrix Data & Selection
   const [dsaTopics, setDsaTopics] = useState<DSAPatternTopic[]>([]);
@@ -113,6 +125,15 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
   // Job search input local edits
   const [jobSearchEditYou, setJobSearchEditYou] = useState({ targetRole: '', companyApplied: '', notes: '' });
   const [jobSearchEditGf, setJobSearchEditGf] = useState({ targetRole: '', companyApplied: '', notes: '' });
+
+  // ----------------------------------------------------
+  // Spreadsheet Schedule Editor State
+  // ----------------------------------------------------
+  const [isScheduleEditorOpen, setIsScheduleEditorOpen] = useState<boolean>(false);
+  const [scheduleItems, setScheduleItems] = useState<ScheduleItemData[]>([]);
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState<boolean>(false);
+  const [pastedContent, setPastedContent] = useState<string>('');
+  const [scheduleValidationError, setScheduleValidationError] = useState<string | null>(null);
 
   // Initial Data Fetch
   useEffect(() => {
@@ -182,7 +203,80 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
     }
   };
 
-  // Profile Task Toggle Handler
+  // ----------------------------------------------------
+  // Live Timer Handlers
+  // ----------------------------------------------------
+  const handleStartTimer = async (activityId: string, activityName: string, profileId: 'you' | 'girlfriend') => {
+    if (!dailyView) return;
+    try {
+      setIsUpdating(true);
+      const updated = await api.startTimer({
+        planId: dailyView.plan.id,
+        date: selectedDate,
+        profileId,
+        activityId,
+        activityName,
+      });
+      setDailyView(updated);
+    } catch (err: any) {
+      alert(err.message || 'Failed to start timer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handlePauseTimer = async (timerId: string) => {
+    try {
+      setIsUpdating(true);
+      const updated = await api.pauseTimer(timerId);
+      setDailyView(updated);
+    } catch (err: any) {
+      alert(err.message || 'Failed to pause timer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleResumeTimer = async (timerId: string) => {
+    try {
+      setIsUpdating(true);
+      const updated = await api.resumeTimer(timerId);
+      setDailyView(updated);
+    } catch (err: any) {
+      alert(err.message || 'Failed to resume timer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleFinishTimer = async (timerId: string) => {
+    try {
+      setIsUpdating(true);
+      const updated = await api.finishTimer(timerId);
+      setDailyView(updated);
+      const cal = await api.getCalendar(selectedPlanId, calendarYear, calendarMonth);
+      setCalendarData(cal);
+    } catch (err: any) {
+      alert(err.message || 'Failed to finish timer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDiscardTimer = async (timerId: string) => {
+    if (!confirm('Discard this stopwatch session? Recorded time will be reset.')) return;
+    try {
+      setIsUpdating(true);
+      const updated = await api.discardTimer(timerId);
+      setDailyView(updated);
+    } catch (err: any) {
+      alert(err.message || 'Failed to discard timer');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Profile Task Toggle Handler (Manual Checkbox fallback)
   const handleToggleTask = async (
     profileId: 'you' | 'girlfriend',
     taskField: 'reactCompleted' | 'afternoonCompleted' | 'jobSearchCompleted',
@@ -202,7 +296,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
       const updated = await api.updateTaskProgress(updatePayload);
       setDailyView(updated);
 
-      // Refresh calendar indicators
       const cal = await api.getCalendar(selectedPlanId, calendarYear, calendarMonth);
       setCalendarData(cal);
     } catch (err: any) {
@@ -363,7 +456,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
         });
       }
       setIsNoteModalOpen(false);
-      // Refresh daily view and calendar
       const day = await api.getDailyView(selectedPlanId, selectedDate);
       setDailyView(day);
       setNotes(day.notes || []);
@@ -417,6 +509,160 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  // ----------------------------------------------------
+  // Schedule Spreadsheet Editor Operations
+  // ----------------------------------------------------
+  const handleOpenScheduleEditor = async () => {
+    if (!dailyView) return;
+    try {
+      setIsUpdating(true);
+      const items = await api.getSchedule(dailyView.plan.id, dailyView.plan.currentDayNumber);
+      setScheduleItems(items);
+      setIsScheduleEditorOpen(true);
+    } catch (err: any) {
+      alert('Failed to load schedule items: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleScheduleItemChange = (index: number, field: keyof ScheduleItemData, value: any) => {
+    setScheduleItems(prev => {
+      const copy = [...prev];
+      const item = { ...copy[index], [field]: value };
+      if (field === 'videoRuntimeMinutes' || field === 'extraBufferMinutes') {
+        const vRuntime = field === 'videoRuntimeMinutes' ? Number(value) : (item.videoRuntimeMinutes || 0);
+        const vBuffer = field === 'extraBufferMinutes' ? Number(value) : (item.extraBufferMinutes || 30);
+        item.durationMinutes = vRuntime > 0 ? vRuntime + vBuffer : item.durationMinutes;
+      }
+      copy[index] = item;
+      return copy;
+    });
+  };
+
+  const handleAddScheduleRow = () => {
+    setScheduleItems(prev => [
+      ...prev,
+      {
+        activityId: `custom-${Date.now()}`,
+        name: 'New Study Activity',
+        activityType: 'custom',
+        targetProfile: 'both',
+        videoRuntimeMinutes: 0,
+        extraBufferMinutes: 0,
+        durationMinutes: 60,
+        isFlexible: false,
+        isScored: true,
+        maxPoints: 1,
+      },
+    ]);
+  };
+
+  const handleDuplicateScheduleRow = (index: number) => {
+    setScheduleItems(prev => {
+      const copy = [...prev];
+      const orig = copy[index];
+      copy.splice(index + 1, 0, {
+        ...orig,
+        activityId: `copy-${Date.now()}`,
+        name: `${orig.name} (Copy)`,
+      });
+      return copy;
+    });
+  };
+
+  const handleDeleteScheduleRow = (index: number) => {
+    setScheduleItems(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!dailyView) return;
+    try {
+      setIsUpdating(true);
+      await api.updateSchedule(dailyView.plan.id, dailyView.plan.currentDayNumber, scheduleItems);
+      setIsScheduleEditorOpen(false);
+      const day = await api.getDailyView(selectedPlanId, selectedDate);
+      setDailyView(day);
+    } catch (err: any) {
+      alert('Error saving schedule: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleImportCsv = async () => {
+    if (!dailyView || !pastedContent.trim()) {
+      alert('Please paste table data or CSV content');
+      return;
+    }
+    try {
+      setIsUpdating(true);
+      setScheduleValidationError(null);
+      const imported = await api.importSchedule(dailyView.plan.id, dailyView.plan.currentDayNumber, pastedContent);
+      setScheduleItems(imported);
+      setIsPasteModalOpen(false);
+      setPastedContent('');
+      const day = await api.getDailyView(selectedPlanId, selectedDate);
+      setDailyView(day);
+    } catch (err: any) {
+      setScheduleValidationError(err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    if (!dailyView) return;
+    try {
+      const csv = await api.exportSchedule(dailyView.plan.id, dailyView.plan.currentDayNumber);
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `study-schedule-day-${dailyView.plan.currentDayNumber}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert('Export failed: ' + err.message);
+    }
+  };
+
+  const handleResetSchedule = async () => {
+    if (!dailyView) return;
+    if (!confirm('Reset schedule to default calculated timetable? Custom items will be replaced.')) return;
+    try {
+      setIsUpdating(true);
+      const items = await api.resetSchedule(dailyView.plan.id, dailyView.plan.currentDayNumber);
+      setScheduleItems(items);
+      const day = await api.getDailyView(selectedPlanId, selectedDate);
+      setDailyView(day);
+    } catch (err: any) {
+      alert('Reset failed: ' + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const template = `Day,Activity,Activity Type,Video Runtime,Extra Buffer,Duration,Target Profile
+1,React — Episode 1,react,68,30,98,both
+1,Lunch Break (60 mins),break,0,0,60,both
+1,Post-Lunch Transition (15 mins),transition,0,0,15,both
+1,DSA Problem Solving (1h 30m),dsa,0,0,90,both
+1,Afternoon Transition (15 mins),transition,0,0,15,both
+1,Project Learning — 1 hour,project-learning,0,0,60,both
+1,Job Search,job-search,0,0,45,both
+1,Bigg Boss,personal,0,0,60,both
+1,Valorant,personal,0,0,120,both`;
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'study-schedule-template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Plan Management Handlers
@@ -510,6 +756,17 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
     }
   };
 
+  // Helper to format live stopwatch time
+  const formatStopwatchTimer = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    const hh = h < 10 ? `0${h}` : `${h}`;
+    const mm = m < 10 ? `0${m}` : `${m}`;
+    const ss = s < 10 ? `0${s}` : `${s}`;
+    return `${hh}:${mm}:${ss}`;
+  };
+
   // Active DSA topic object for selected profile
   const activeDSATopicId = dailyView?.profiles[activeDSAProfile]?.dsa?.topicId || 'arrays-hashing';
   const currentDSATopic = dsaTopics.find(t => t.id === activeDSATopicId) || dsaTopics[0];
@@ -527,7 +784,7 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
       <div className="p-8 flex items-center justify-center min-h-[60vh]">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
-          <p className="text-xs font-mono text-zinc-500">Loading Study Planner & Roadmap...</p>
+          <p className="text-xs font-mono text-zinc-500">Loading Study Planner & Timetable...</p>
         </div>
       </div>
     );
@@ -623,7 +880,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                 </span>
               </div>
             </div>
-            {/* Progress bar */}
             <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
               <div
                 className="bg-blue-500 h-full rounded-full transition-all duration-300"
@@ -649,7 +905,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                 </span>
               </div>
             </div>
-            {/* Progress bar */}
             <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
               <div
                 className="bg-pink-500 h-full rounded-full transition-all duration-300"
@@ -661,7 +916,396 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
       </div>
 
       {/* -------------------------------------------------------------------------------- */}
-      {/* 2. CALENDAR VIEW */}
+      {/* 2. COMPACT TIMETABLE & LIVE STOPWATCH ENGINE */}
+      {/* -------------------------------------------------------------------------------- */}
+      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
+        {/* Timetable Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800/60">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-emerald-400" />
+                Daily Study Routine
+              </h2>
+              {dailyView?.totalPlannedFormatted && (
+                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
+                  Planned: {dailyView.totalPlannedFormatted}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Right Controls: Start Time Toggle & Edit Schedule */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Start Time Toggle */}
+            <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800 rounded-xl p-1 text-xs">
+              <span className="text-zinc-500 px-2 font-mono">Start:</span>
+              <button
+                onClick={() => handleStartTimeChange('10:30')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                  dailyView?.startTime === '10:30'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                10:30 AM
+              </button>
+              <button
+                onClick={() => handleStartTimeChange('11:00')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition ${
+                  dailyView?.startTime === '11:00'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                11:00 AM
+              </button>
+            </div>
+
+            {/* Edit Schedule Button */}
+            <button
+              onClick={handleOpenScheduleEditor}
+              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium flex items-center gap-1.5 transition border border-zinc-700"
+            >
+              <Table className="w-3.5 h-3.5 text-blue-400" />
+              Edit Schedule
+            </button>
+          </div>
+        </div>
+
+        {/* Current Activity Banner ("What should I be doing now?") */}
+        {dailyView?.currentActivity && (
+          <div className="bg-gradient-to-r from-blue-950/40 via-zinc-900/60 to-purple-950/30 border border-blue-500/30 rounded-xl p-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+              <div>
+                <p className="text-[11px] font-mono uppercase text-blue-400 font-semibold tracking-wider">
+                  Active Now
+                </p>
+                <p className="text-sm font-semibold text-zinc-100">{dailyView.currentActivity.name}</p>
+              </div>
+            </div>
+            <div className="text-right font-mono text-xs text-zinc-400">
+              <span>Planned: {dailyView.currentActivity.startTimeFormatted} – {dailyView.currentActivity.endTimeFormatted}</span>
+              <span className="ml-2 text-zinc-500">({dailyView.currentActivity.durationFormatted})</span>
+            </div>
+          </div>
+        )}
+
+        {/* Compact Timetable Grid */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-zinc-800 text-[11px] font-mono text-zinc-500 uppercase tracking-wider">
+                <th className="py-2.5 px-3">Activity</th>
+                <th className="py-2.5 px-3">Planned Time</th>
+                <th className="py-2.5 px-3">Est. Duration</th>
+                <th className="py-2.5 px-3">You (Blue)</th>
+                <th className="py-2.5 px-3">Girlfriend (Pink)</th>
+                <th className="py-2.5 px-3 text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/60">
+              {dailyView?.timetable.map((slot: TaskTimeSlot) => {
+                // Subtle Timeline Separator for Break / Transition
+                if (slot.isBreakOrTransition) {
+                  return (
+                    <tr
+                      key={slot.id}
+                      className="bg-zinc-950/30 text-zinc-500 hover:bg-zinc-900/20 transition-colors"
+                    >
+                      <td colSpan={2} className="py-2 px-3">
+                        <div className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-zinc-700"></span>
+                          <span className="font-medium text-zinc-400">{slot.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-3 font-mono text-zinc-500">
+                        {slot.startTimeFormatted} – {slot.endTimeFormatted} ({slot.durationFormatted})
+                      </td>
+                      <td colSpan={2} className="py-2 px-3 text-[11px] font-mono text-zinc-600">
+                        Rest / Transition Window
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono text-zinc-600">
+                        Break
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Actual Activity Row
+                const youRunning = slot.youTimer?.status === 'running';
+                const youPaused = slot.youTimer?.status === 'paused';
+                const youCompleted = slot.youTimer?.status === 'completed' || dailyView.profiles.you.progress.reactCompleted && slot.category === 'react';
+
+                const gfRunning = slot.girlfriendTimer?.status === 'running';
+                const gfPaused = slot.girlfriendTimer?.status === 'paused';
+                const gfCompleted = slot.girlfriendTimer?.status === 'completed' || dailyView.profiles.girlfriend.progress.reactCompleted && slot.category === 'react';
+
+                return (
+                  <tr
+                    key={slot.id}
+                    className={`transition-colors ${
+                      slot.isCurrent
+                        ? 'bg-blue-950/20 hover:bg-blue-950/30 ring-1 ring-blue-500/30'
+                        : 'hover:bg-zinc-800/30'
+                    }`}
+                  >
+                    {/* 1. Activity Name & Links */}
+                    <td className="py-3 px-3">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          {slot.category === 'react' && <Video className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />}
+                          {slot.category === 'dsa' && <Code2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />}
+                          {slot.category === 'afternoon' && <BookOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
+                          {slot.category === 'job-search' && <Briefcase className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />}
+                          <span className="font-semibold text-zinc-200">{slot.name}</span>
+                        </div>
+
+                        {/* Extra contextual links */}
+                        <div className="flex items-center gap-2 pt-0.5 text-[11px]">
+                          {slot.videoUrl && (
+                            <a
+                              href={slot.videoUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-400 hover:text-blue-300 flex items-center gap-1 transition"
+                            >
+                              <Play className="w-3 h-3 fill-current" /> Watch Video
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          )}
+                          {slot.category === 'dsa' && (
+                            <a href="#dsa-section" className="text-emerald-400 hover:underline">
+                              DSA Matrix ({dailyView.profiles[activeDSAProfile].dsa.completedCount}/10 solved)
+                            </a>
+                          )}
+                          {slot.targetMissed5PM && (
+                            <span className="text-amber-400 font-mono flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" /> Target 5:00 PM delayed
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* 2. Planned Time */}
+                    <td className="py-3 px-3 font-mono text-zinc-300">
+                      {slot.startTimeFormatted} – {slot.endTimeFormatted}
+                    </td>
+
+                    {/* 3. Estimated Duration */}
+                    <td className="py-3 px-3 font-mono text-zinc-400">
+                      {slot.durationFormatted}
+                      {slot.isScored && (
+                        <span className="ml-1.5 text-[10px] px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                          +{slot.maxPoints} pts
+                        </span>
+                      )}
+                    </td>
+
+                    {/* 4. You (Blue Profile Stopwatch & Controls) */}
+                    <td className="py-3 px-3">
+                      <div className="bg-zinc-950/60 border border-blue-500/20 rounded-lg p-2 space-y-1.5 min-w-[190px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-blue-400 font-semibold uppercase">You</span>
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                              slot.youTimer?.isOvertime
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {slot.youTimer?.diffFormatted || '—'}
+                          </span>
+                        </div>
+
+                        {/* Stopwatch Display */}
+                        <div className="flex items-center justify-between font-mono">
+                          <span
+                            className={`text-xs font-bold ${
+                              youRunning ? 'text-blue-400 animate-pulse' : 'text-zinc-200'
+                            }`}
+                          >
+                            {formatStopwatchTimer(slot.youTimer?.elapsedSeconds || 0)}
+                          </span>
+
+                          {/* Stopwatch Action Buttons */}
+                          <div className="flex items-center gap-1">
+                            {slot.youTimer?.status !== 'running' && slot.youTimer?.status !== 'completed' && (
+                              <button
+                                onClick={() => handleStartTimer(slot.id, slot.name, 'you')}
+                                className="p-1 rounded bg-blue-600 hover:bg-blue-500 text-white transition"
+                                title="Start Stopwatch"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {slot.youTimer?.status === 'running' && (
+                              <button
+                                onClick={() => handlePauseTimer(slot.youTimer!.timerId!)}
+                                className="p-1 rounded bg-amber-600 hover:bg-amber-500 text-white transition"
+                                title="Pause Stopwatch"
+                              >
+                                <Pause className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {slot.youTimer?.status === 'paused' && (
+                              <button
+                                onClick={() => handleResumeTimer(slot.youTimer!.timerId!)}
+                                className="p-1 rounded bg-blue-600 hover:bg-blue-500 text-white transition"
+                                title="Resume Stopwatch"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {(slot.youTimer?.status === 'running' || slot.youTimer?.status === 'paused') && (
+                              <button
+                                onClick={() => handleFinishTimer(slot.youTimer!.timerId!)}
+                                className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                                title="Finish and Save Time"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            )}
+                            {slot.youTimer?.status === 'completed' && (
+                              <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-0.5">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Done
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actual time spent & start/finish timestamps */}
+                        {slot.youTimer?.actualDurationFormatted && slot.youTimer.actualDurationFormatted !== '—' && (
+                          <div className="text-[10px] font-mono text-zinc-500 flex items-center justify-between pt-0.5 border-t border-zinc-800/60">
+                            <span>Actual: {slot.youTimer.actualDurationFormatted}</span>
+                            {slot.youTimer.actualStartFormatted && (
+                              <span>{slot.youTimer.actualStartFormatted}–{slot.youTimer.actualFinishFormatted || 'now'}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* 5. Girlfriend (Pink Profile Stopwatch & Controls) */}
+                    <td className="py-3 px-3">
+                      <div className="bg-zinc-950/60 border border-pink-500/20 rounded-lg p-2 space-y-1.5 min-w-[190px]">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-pink-400 font-semibold uppercase">Girlfriend</span>
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                              slot.girlfriendTimer?.isOvertime
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {slot.girlfriendTimer?.diffFormatted || '—'}
+                          </span>
+                        </div>
+
+                        {/* Stopwatch Display */}
+                        <div className="flex items-center justify-between font-mono">
+                          <span
+                            className={`text-xs font-bold ${
+                              gfRunning ? 'text-pink-400 animate-pulse' : 'text-zinc-200'
+                            }`}
+                          >
+                            {formatStopwatchTimer(slot.girlfriendTimer?.elapsedSeconds || 0)}
+                          </span>
+
+                          {/* Stopwatch Action Buttons */}
+                          <div className="flex items-center gap-1">
+                            {slot.girlfriendTimer?.status !== 'running' && slot.girlfriendTimer?.status !== 'completed' && (
+                              <button
+                                onClick={() => handleStartTimer(slot.id, slot.name, 'girlfriend')}
+                                className="p-1 rounded bg-pink-600 hover:bg-pink-500 text-white transition"
+                                title="Start Stopwatch"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {slot.girlfriendTimer?.status === 'running' && (
+                              <button
+                                onClick={() => handlePauseTimer(slot.girlfriendTimer!.timerId!)}
+                                className="p-1 rounded bg-amber-600 hover:bg-amber-500 text-white transition"
+                                title="Pause Stopwatch"
+                              >
+                                <Pause className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {slot.girlfriendTimer?.status === 'paused' && (
+                              <button
+                                onClick={() => handleResumeTimer(slot.girlfriendTimer!.timerId!)}
+                                className="p-1 rounded bg-pink-600 hover:bg-pink-500 text-white transition"
+                                title="Resume Stopwatch"
+                              >
+                                <Play className="w-3 h-3 fill-current" />
+                              </button>
+                            )}
+                            {(slot.girlfriendTimer?.status === 'running' || slot.girlfriendTimer?.status === 'paused') && (
+                              <button
+                                onClick={() => handleFinishTimer(slot.girlfriendTimer!.timerId!)}
+                                className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition"
+                                title="Finish and Save Time"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                            )}
+                            {slot.girlfriendTimer?.status === 'completed' && (
+                              <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-0.5">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Done
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Actual time spent & start/finish timestamps */}
+                        {slot.girlfriendTimer?.actualDurationFormatted && slot.girlfriendTimer.actualDurationFormatted !== '—' && (
+                          <div className="text-[10px] font-mono text-zinc-500 flex items-center justify-between pt-0.5 border-t border-zinc-800/60">
+                            <span>Actual: {slot.girlfriendTimer.actualDurationFormatted}</span>
+                            {slot.girlfriendTimer.actualStartFormatted && (
+                              <span>{slot.girlfriendTimer.actualStartFormatted}–{slot.girlfriendTimer.actualFinishFormatted || 'now'}</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* 6. Overall Row Status */}
+                    <td className="py-3 px-3 text-right">
+                      {youCompleted && gfCompleted ? (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                          Completed
+                        </span>
+                      ) : youRunning || gfRunning ? (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+                          Running
+                        </span>
+                      ) : slot.isCurrent ? (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          Active Now
+                        </span>
+                      ) : slot.isPast ? (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                          Past
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-950 text-zinc-500 border border-zinc-800">
+                          Upcoming
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* -------------------------------------------------------------------------------- */}
+      {/* 3. CALENDAR VIEW */}
       {/* -------------------------------------------------------------------------------- */}
       <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-sm">
         {/* Month Navigation */}
@@ -712,7 +1356,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
         {/* Calendar Grid */}
         <div className="grid grid-cols-7 gap-1.5">
           {(() => {
-            // Calculate first day of month padding
             const firstDayIndex = new Date(calendarYear, calendarMonth - 1, 1).getDay();
             const blanks = Array.from({ length: firstDayIndex }, (_, i) => i);
             const days = calendarData?.days || [];
@@ -740,7 +1383,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                           : 'bg-zinc-950/30 border-zinc-900/40 text-zinc-600 hover:bg-zinc-900/30'
                       }`}
                     >
-                      {/* Date Header */}
                       <div className="flex items-center justify-between w-full">
                         <span
                           className={`text-xs font-semibold ${
@@ -762,9 +1404,7 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                         )}
                       </div>
 
-                      {/* Profile Indicators & Scores */}
                       <div className="space-y-1 w-full pt-1">
-                        {/* You indicator */}
                         <div className="flex items-center justify-between text-[10px] font-mono leading-none">
                           <div className="flex items-center gap-1">
                             <span
@@ -774,14 +1414,11 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                             ></span>
                             <span className="text-zinc-400">Y</span>
                           </div>
-                          <span
-                            className={dayItem.you.score > 0 ? 'text-blue-400 font-bold' : 'text-zinc-600'}
-                          >
+                          <span className={dayItem.you.score > 0 ? 'text-blue-400 font-bold' : 'text-zinc-600'}>
                             {dayItem.you.score}/10
                           </span>
                         </div>
 
-                        {/* Girlfriend indicator */}
                         <div className="flex items-center justify-between text-[10px] font-mono leading-none">
                           <div className="flex items-center gap-1">
                             <span
@@ -791,9 +1428,7 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                             ></span>
                             <span className="text-zinc-400">GF</span>
                           </div>
-                          <span
-                            className={dayItem.girlfriend.score > 0 ? 'text-pink-400 font-bold' : 'text-zinc-600'}
-                          >
+                          <span className={dayItem.girlfriend.score > 0 ? 'text-pink-400 font-bold' : 'text-zinc-600'}>
                             {dayItem.girlfriend.score}/10
                           </span>
                         </div>
@@ -808,434 +1443,9 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
       </div>
 
       {/* -------------------------------------------------------------------------------- */}
-      {/* 3. DAILY STUDY VIEW (TIMETABLE & TASKS) */}
-      {/* -------------------------------------------------------------------------------- */}
-      <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
-        {/* Timetable Header & Start Time Switcher */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800/60">
-          <div>
-            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-emerald-400" />
-              Daily Study Routine & Timetable
-            </h2>
-            <p className="text-xs text-zinc-400">
-              Ordered tasks with dynamic finish times, runtime calculations, and dual-profile tracking.
-            </p>
-          </div>
-
-          {/* 10:30 vs 11:00 AM start time selector */}
-          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-1 text-xs">
-            <span className="text-zinc-400 px-2 font-mono">Start Time:</span>
-            <button
-              onClick={() => handleStartTimeChange('10:30')}
-              className={`px-3 py-1 rounded-lg font-medium transition ${
-                dailyView?.startTime === '10:30'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              10:30 AM
-            </button>
-            <button
-              onClick={() => handleStartTimeChange('11:00')}
-              className={`px-3 py-1 rounded-lg font-medium transition ${
-                dailyView?.startTime === '11:00'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              11:00 AM
-            </button>
-          </div>
-        </div>
-
-        {/* Timetable Tasks Stack */}
-        <div className="space-y-3">
-          {dailyView?.timetable.map((slot, idx) => {
-            if (slot.category === 'react') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                        {slot.startTime} – {slot.endTime}
-                      </span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        +2 pts
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <Video className="w-4 h-4 text-blue-400" />
-                      {slot.title}
-                    </h3>
-                    <p className="text-xs text-zinc-400">{slot.description}</p>
-                    {slot.link && (
-                      <a
-                        href={slot.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition pt-1"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" /> Watch Episode on YouTube
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Dual Checkboxes */}
-                  <div className="flex items-center gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5">
-                    {/* You Checkbox */}
-                    <button
-                      onClick={() =>
-                        handleToggleTask('you', 'reactCompleted', !!dailyView.profiles.you.progress.reactCompleted)
-                      }
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                        dailyView.profiles.you.progress.reactCompleted
-                          ? 'bg-blue-600/20 border-blue-500 text-blue-300'
-                          : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-blue-500/50'
-                      }`}
-                    >
-                      {dailyView.profiles.you.progress.reactCompleted ? (
-                        <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                      ) : (
-                        <Circle className="w-4 h-4 text-zinc-500" />
-                      )}
-                      You Done
-                    </button>
-
-                    {/* Girlfriend Checkbox */}
-                    <button
-                      onClick={() =>
-                        handleToggleTask(
-                          'girlfriend',
-                          'reactCompleted',
-                          !!dailyView.profiles.girlfriend.progress.reactCompleted
-                        )
-                      }
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                        dailyView.profiles.girlfriend.progress.reactCompleted
-                          ? 'bg-pink-600/20 border-pink-500 text-pink-300'
-                          : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-pink-500/50'
-                      }`}
-                    >
-                      {dailyView.profiles.girlfriend.progress.reactCompleted ? (
-                        <CheckCircle2 className="w-4 h-4 text-pink-400" />
-                      ) : (
-                        <Circle className="w-4 h-4 text-zinc-500" />
-                      )}
-                      Girlfriend Done
-                    </button>
-                  </div>
-                </div>
-              );
-            }
-
-            if (slot.category === 'lunch') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/30 border border-zinc-900/60 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-zinc-500"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-zinc-400">
-                      {slot.startTime} – {slot.endTime}
-                    </span>
-                    <span>•</span>
-                    <span className="font-medium text-zinc-400">{slot.title}</span>
-                    <span>({slot.durationMinutes} mins)</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-zinc-600">Rest & Recharge</span>
-                </div>
-              );
-            }
-
-            if (slot.category === 'dsa') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        {slot.startTime} – {slot.endTime}
-                      </span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        +1 to 3 pts
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <Code2 className="w-4 h-4 text-emerald-400" />
-                      {slot.title}
-                    </h3>
-                    <p className="text-xs text-zinc-400">{slot.description}</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <a
-                      href="#dsa-section"
-                      className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium flex items-center gap-1.5 transition"
-                    >
-                      Go to DSA Matrix
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-              );
-            }
-
-            if (slot.category === 'afternoon') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                        {slot.startTime} – {slot.endTime}
-                      </span>
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                        +2 pts
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-purple-400" />
-                      {slot.title}
-                    </h3>
-                    <p className="text-xs text-zinc-400">{slot.description}</p>
-                  </div>
-
-                  {/* Dual Checkboxes */}
-                  <div className="flex items-center gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5">
-                    <button
-                      onClick={() =>
-                        handleToggleTask(
-                          'you',
-                          'afternoonCompleted',
-                          !!dailyView.profiles.you.progress.afternoonCompleted
-                        )
-                      }
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                        dailyView.profiles.you.progress.afternoonCompleted
-                          ? 'bg-blue-600/20 border-blue-500 text-blue-300'
-                          : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-blue-500/50'
-                      }`}
-                    >
-                      {dailyView.profiles.you.progress.afternoonCompleted ? (
-                        <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                      ) : (
-                        <Circle className="w-4 h-4 text-zinc-500" />
-                      )}
-                      You Done
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        handleToggleTask(
-                          'girlfriend',
-                          'afternoonCompleted',
-                          !!dailyView.profiles.girlfriend.progress.afternoonCompleted
-                        )
-                      }
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                        dailyView.profiles.girlfriend.progress.afternoonCompleted
-                          ? 'bg-pink-600/20 border-pink-500 text-pink-300'
-                          : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-pink-500/50'
-                      }`}
-                    >
-                      {dailyView.profiles.girlfriend.progress.afternoonCompleted ? (
-                        <CheckCircle2 className="w-4 h-4 text-pink-400" />
-                      ) : (
-                        <Circle className="w-4 h-4 text-zinc-500" />
-                      )}
-                      Girlfriend Done
-                    </button>
-                  </div>
-                </div>
-              );
-            }
-
-            if (slot.category === 'job_search') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/70 border border-zinc-800/80 rounded-xl p-4 space-y-3"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          {slot.startTime} – {slot.endTime}
-                        </span>
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                          +2 pts
-                        </span>
-                      </div>
-                      <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                        <Briefcase className="w-4 h-4 text-amber-400" />
-                        {slot.title}
-                      </h3>
-                      <p className="text-xs text-zinc-400">{slot.description}</p>
-                    </div>
-
-                    {/* Dual Checkboxes */}
-                    <div className="flex items-center gap-3 bg-zinc-900/80 border border-zinc-800 rounded-xl p-2.5">
-                      <button
-                        onClick={() =>
-                          handleToggleTask(
-                            'you',
-                            'jobSearchCompleted',
-                            !!dailyView.profiles.you.progress.jobSearchCompleted
-                          )
-                        }
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                          dailyView.profiles.you.progress.jobSearchCompleted
-                            ? 'bg-blue-600/20 border-blue-500 text-blue-300'
-                            : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-blue-500/50'
-                        }`}
-                      >
-                        {dailyView.profiles.you.progress.jobSearchCompleted ? (
-                          <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                        ) : (
-                          <Circle className="w-4 h-4 text-zinc-500" />
-                        )}
-                        You Done
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          handleToggleTask(
-                            'girlfriend',
-                            'jobSearchCompleted',
-                            !!dailyView.profiles.girlfriend.progress.jobSearchCompleted
-                          )
-                        }
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-                          dailyView.profiles.girlfriend.progress.jobSearchCompleted
-                            ? 'bg-pink-600/20 border-pink-500 text-pink-300'
-                            : 'bg-zinc-800/40 border-zinc-700 text-zinc-400 hover:border-pink-500/50'
-                        }`}
-                      >
-                        {dailyView.profiles.girlfriend.progress.jobSearchCompleted ? (
-                          <CheckCircle2 className="w-4 h-4 text-pink-400" />
-                        ) : (
-                          <Circle className="w-4 h-4 text-zinc-500" />
-                        )}
-                        Girlfriend Done
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Profile Job Search Fields */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/50 text-xs">
-                    {/* You Fields */}
-                    <div className="bg-zinc-900/40 border border-blue-500/20 rounded-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-blue-400">You — Application Tracker</span>
-                        <button
-                          onClick={() => handleSaveJobSearch('you')}
-                          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] transition"
-                        >
-                          Save
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          placeholder="Role (e.g. Frontend Eng)"
-                          value={jobSearchEditYou.targetRole}
-                          onChange={e => setJobSearchEditYou(prev => ({ ...prev, targetRole: e.target.value }))}
-                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Company (e.g. Stripe)"
-                          value={jobSearchEditYou.companyApplied}
-                          onChange={e => setJobSearchEditYou(prev => ({ ...prev, companyApplied: e.target.value }))}
-                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Notes / link to application"
-                        value={jobSearchEditYou.notes}
-                        onChange={e => setJobSearchEditYou(prev => ({ ...prev, notes: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-
-                    {/* Girlfriend Fields */}
-                    <div className="bg-zinc-900/40 border border-pink-500/20 rounded-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-pink-400">Girlfriend — Application Tracker</span>
-                        <button
-                          onClick={() => handleSaveJobSearch('girlfriend')}
-                          className="px-2 py-0.5 rounded bg-pink-600 hover:bg-pink-500 text-white font-medium text-[11px] transition"
-                        >
-                          Save
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          placeholder="Role (e.g. SDE II)"
-                          value={jobSearchEditGf.targetRole}
-                          onChange={e => setJobSearchEditGf(prev => ({ ...prev, targetRole: e.target.value }))}
-                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-pink-500"
-                        />
-                        <input
-                          type="text"
-                          placeholder="Company (e.g. Microsoft)"
-                          value={jobSearchEditGf.companyApplied}
-                          onChange={e => setJobSearchEditGf(prev => ({ ...prev, companyApplied: e.target.value }))}
-                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-pink-500"
-                        />
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Notes / referral contact"
-                        value={jobSearchEditGf.notes}
-                        onChange={e => setJobSearchEditGf(prev => ({ ...prev, notes: e.target.value }))}
-                        className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-pink-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-
-            if (slot.category === 'personal') {
-              return (
-                <div
-                  key={idx}
-                  className="bg-zinc-950/40 border border-zinc-900/60 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-zinc-500"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-zinc-400">
-                      {slot.startTime} – {slot.endTime}
-                    </span>
-                    <span>•</span>
-                    <span className="font-medium text-zinc-300">{slot.title}</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-zinc-600">Personal Evening Routine (Unscored)</span>
-                </div>
-              );
-            }
-
-            return null;
-          })}
-        </div>
-      </div>
-
-      {/* -------------------------------------------------------------------------------- */}
       {/* 4. DSA QUESTION TRACKER */}
       {/* -------------------------------------------------------------------------------- */}
       <div id="dsa-section" className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5 shadow-sm space-y-4">
-        {/* DSA Tracker Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-zinc-800/60">
           <div>
             <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
@@ -1247,7 +1457,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
             </p>
           </div>
 
-          {/* Profile Switcher for DSA */}
           <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-1 text-xs">
             <button
               onClick={() => setActiveDSAProfile('you')}
@@ -1274,7 +1483,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
           </div>
         </div>
 
-        {/* Pattern Topic Dropdown / Selector */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-950/60 border border-zinc-800/60 rounded-xl p-3">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-mono text-zinc-400">Current Pattern:</span>
@@ -1291,7 +1499,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
             </select>
           </div>
 
-          {/* Solved Target Banner */}
           <div className="flex items-center gap-2 text-xs">
             <span className="text-zinc-400 font-mono">
               Daily Target: <span className="text-emerald-400 font-bold">2–3 questions</span>
@@ -1302,7 +1509,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
           </div>
         </div>
 
-        {/* 10 Questions Matrix */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
           {currentDSATopic?.questions.map(q => {
             const isSolved = activeDSACompletedList.includes(q.number);
@@ -1403,12 +1609,11 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
 
         {/* Filter Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-          {/* Profile Filter */}
           <div className="flex items-center gap-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1">
             <button
-              onClick={() => setActiveNoteProfile('all' as any)}
+              onClick={() => setActiveNoteProfile('all')}
               className={`px-2.5 py-1 rounded font-medium transition ${
-                (activeNoteProfile as string) === 'all'
+                activeNoteProfile === 'all'
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
@@ -1437,7 +1642,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
             </button>
           </div>
 
-          {/* Activity Filter */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
             {['all', 'dsa', 'react', 'system-design', 'project-learning', 'job-search'].map(act => (
               <button
@@ -1527,7 +1731,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                     </div>
                   )}
 
-                  {/* Complexities */}
                   {(n.timeComplexity || n.spaceComplexity) && (
                     <div className="flex items-center gap-2 pt-1 font-mono text-[11px]">
                       {n.timeComplexity && (
@@ -1544,7 +1747,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                   )}
                 </div>
 
-                {/* Concept Library Export Button */}
                 <div className="pt-2 border-t border-zinc-800/60 flex items-center justify-between">
                   {n.conceptId ? (
                     <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
@@ -1574,6 +1776,280 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
       </div>
 
       {/* -------------------------------------------------------------------------------- */}
+      {/* SPREADSHEET SCHEDULE EDITOR MODAL */}
+      {/* -------------------------------------------------------------------------------- */}
+      {isScheduleEditorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-blue-400" />
+                <h3 className="text-base font-semibold text-zinc-100">
+                  Schedule Spreadsheet Editor — Day {dailyView?.plan.currentDayNumber}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDownloadTemplate}
+                  className="px-2.5 py-1 text-xs font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 rounded-lg hover:bg-zinc-800 transition flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3" /> Template CSV
+                </button>
+                <button
+                  onClick={() => setIsPasteModalOpen(true)}
+                  className="px-2.5 py-1 text-xs font-mono text-blue-400 hover:text-blue-300 bg-blue-500/10 rounded-lg hover:bg-blue-500/20 transition flex items-center gap-1 border border-blue-500/20"
+                >
+                  <Upload className="w-3 h-3" /> Paste from Excel / CSV
+                </button>
+                <button
+                  onClick={handleExportCsv}
+                  className="px-2.5 py-1 text-xs font-mono text-zinc-400 hover:text-zinc-200 bg-zinc-800/80 rounded-lg hover:bg-zinc-800 transition flex items-center gap-1"
+                >
+                  <Download className="w-3 h-3" /> Export CSV
+                </button>
+                <button
+                  onClick={handleResetSchedule}
+                  className="px-2.5 py-1 text-xs font-mono text-rose-400 hover:text-rose-300 bg-rose-500/10 rounded-lg hover:bg-rose-500/20 transition flex items-center gap-1 border border-rose-500/20"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reset
+                </button>
+                <button
+                  onClick={() => setIsScheduleEditorOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-200 text-sm ml-2"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Editable Spreadsheet Grid */}
+            <div className="flex-1 overflow-auto p-4">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-800 text-[11px] font-mono text-zinc-400 uppercase">
+                    <th className="py-2 px-2">#</th>
+                    <th className="py-2 px-2">Activity Name</th>
+                    <th className="py-2 px-2">Type</th>
+                    <th className="py-2 px-2">Video Runtime (m)</th>
+                    <th className="py-2 px-2">Extra Buffer (m)</th>
+                    <th className="py-2 px-2">Duration (m)</th>
+                    <th className="py-2 px-2">Profile</th>
+                    <th className="py-2 px-2">Video URL</th>
+                    <th className="py-2 px-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800">
+                  {scheduleItems.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-zinc-800/40">
+                      <td className="py-2 px-2 font-mono text-zinc-500">{idx + 1}</td>
+
+                      {/* Name */}
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => handleScheduleItemChange(idx, 'name', e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-blue-500"
+                        />
+                      </td>
+
+                      {/* Activity Type */}
+                      <td className="py-2 px-2">
+                        <select
+                          value={row.activityType}
+                          onChange={e => handleScheduleItemChange(idx, 'activityType', e.target.value)}
+                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-blue-500 font-mono text-[11px]"
+                        >
+                          <option value="react">React</option>
+                          <option value="break">Break</option>
+                          <option value="transition">Transition</option>
+                          <option value="dsa">DSA</option>
+                          <option value="project-learning">Project</option>
+                          <option value="system-design">Sys Design</option>
+                          <option value="job-search">Job Search</option>
+                          <option value="personal">Personal</option>
+                          <option value="custom">Custom</option>
+                        </select>
+                      </td>
+
+                      {/* Video Runtime */}
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.videoRuntimeMinutes || 0}
+                          onChange={e => handleScheduleItemChange(idx, 'videoRuntimeMinutes', parseInt(e.target.value, 10) || 0)}
+                          className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-center focus:outline-none focus:border-blue-500"
+                        />
+                      </td>
+
+                      {/* Extra Buffer */}
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.extraBufferMinutes || 0}
+                          onChange={e => handleScheduleItemChange(idx, 'extraBufferMinutes', parseInt(e.target.value, 10) || 0)}
+                          className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-center focus:outline-none focus:border-blue-500"
+                        />
+                      </td>
+
+                      {/* Duration Minutes */}
+                      <td className="py-2 px-2">
+                        <input
+                          type="number"
+                          min={1}
+                          value={row.durationMinutes || 60}
+                          onChange={e => handleScheduleItemChange(idx, 'durationMinutes', parseInt(e.target.value, 10) || 60)}
+                          className="w-16 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-center focus:outline-none focus:border-blue-500"
+                        />
+                      </td>
+
+                      {/* Target Profile */}
+                      <td className="py-2 px-2">
+                        <select
+                          value={row.targetProfile || 'both'}
+                          onChange={e => handleScheduleItemChange(idx, 'targetProfile', e.target.value)}
+                          className="bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-blue-500 font-mono text-[11px]"
+                        >
+                          <option value="both">Both</option>
+                          <option value="you">You</option>
+                          <option value="girlfriend">Girlfriend</option>
+                        </select>
+                      </td>
+
+                      {/* Video URL */}
+                      <td className="py-2 px-2">
+                        <input
+                          type="text"
+                          placeholder="https://youtube.com/..."
+                          value={row.videoUrl || ''}
+                          onChange={e => handleScheduleItemChange(idx, 'videoUrl', e.target.value)}
+                          className="w-36 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-zinc-200 text-[11px] focus:outline-none focus:border-blue-500"
+                        />
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-2 px-2 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => handleDuplicateScheduleRow(idx)}
+                            className="p-1 text-zinc-400 hover:text-zinc-200 transition"
+                            title="Duplicate Row"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteScheduleRow(idx)}
+                            className="p-1 text-zinc-400 hover:text-rose-400 transition"
+                            title="Delete Row"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <button
+                onClick={handleAddScheduleRow}
+                className="mt-3 px-3 py-1.5 rounded-lg border border-dashed border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 text-xs font-mono flex items-center gap-1.5 transition"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add Activity Row
+              </button>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-zinc-800 flex items-center justify-between">
+              <span className="text-xs font-mono text-zinc-500">
+                {scheduleItems.length} rows configured
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsScheduleEditorOpen(false)}
+                  className="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 text-xs font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveSchedule}
+                  className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-sm transition"
+                >
+                  Save Schedule
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------------------------------------------------------------------- */}
+      {/* BULK IMPORT / PASTE FROM EXCEL MODAL */}
+      {/* -------------------------------------------------------------------------------- */}
+      {isPasteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <h3 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <Upload className="w-4 h-4 text-blue-400" />
+                Paste Rows from Excel / Google Sheets
+              </h3>
+              <button
+                onClick={() => {
+                  setIsPasteModalOpen(false);
+                  setScheduleValidationError(null);
+                }}
+                className="text-zinc-400 hover:text-zinc-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              Copy rows directly from Excel or Google Sheets (or CSV) and paste below. The first row should contain headers (e.g. Activity, Duration, Type).
+            </p>
+
+            {scheduleValidationError && (
+              <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-mono">
+                {scheduleValidationError}
+              </div>
+            )}
+
+            <textarea
+              rows={8}
+              placeholder={`Activity\tDuration\tType\nReact\t90\treact\nLunch\t60\tbreak\nDSA\t90\tdsa`}
+              value={pastedContent}
+              onChange={e => setPastedContent(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-blue-500"
+            ></textarea>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800">
+              <button
+                onClick={() => {
+                  setIsPasteModalOpen(false);
+                  setScheduleValidationError(null);
+                }}
+                className="px-3 py-1.5 rounded-lg text-zinc-400 hover:text-zinc-200 text-xs font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleImportCsv}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+              >
+                Parse and Load Rows
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -------------------------------------------------------------------------------- */}
       {/* MODAL: ADD / EDIT NOTE */}
       {/* -------------------------------------------------------------------------------- */}
       {isNoteModalOpen && (
@@ -1593,7 +2069,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
             </div>
 
             <div className="space-y-3 text-xs">
-              {/* Profile selector */}
               <div>
                 <label className="text-zinc-400 font-mono block mb-1">Author Profile</label>
                 <div className="flex gap-2">
@@ -1622,7 +2097,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                 </div>
               </div>
 
-              {/* Title & Activity */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-zinc-400 font-mono block mb-1">Title</label>
@@ -1651,7 +2125,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                 </div>
               </div>
 
-              {/* Approach & Observations */}
               <div>
                 <label className="text-zinc-400 font-mono block mb-1">Approach / Core Strategy</label>
                 <textarea
@@ -1674,7 +2147,6 @@ export const StudyPlanner: React.FC<StudyPlannerProps> = () => {
                 ></textarea>
               </div>
 
-              {/* Complexities */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-zinc-400 font-mono block mb-1">Time Complexity</label>

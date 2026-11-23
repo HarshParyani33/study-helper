@@ -8,6 +8,10 @@ import {
   createStudyNoteSchema,
   updateStudyNoteSchema,
   convertNoteToConceptSchema,
+  startTimerSchema,
+  timerActionSchema,
+  batchUpdateScheduleSchema,
+  importScheduleSchema,
 } from '../validators/planner.schema.js';
 import { REACT_EPISODES } from '../data/reactEpisodes.js';
 
@@ -178,5 +182,115 @@ export class PlannerController {
 
   static async getReactEpisodes(req: Request, res: Response) {
     res.json({ success: true, data: REACT_EPISODES });
+  }
+
+  // Timer Controller Endpoints
+  static async startTimer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = startTimerSchema.parse(req.body);
+      const data = await PlannerService.startTimer(parsed);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async pauseTimer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = timerActionSchema.parse(req.body);
+      const data = await PlannerService.pauseTimer(parsed.timerId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async resumeTimer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = timerActionSchema.parse(req.body);
+      const data = await PlannerService.resumeTimer(parsed.timerId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async finishTimer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = timerActionSchema.parse(req.body);
+      const data = await PlannerService.finishTimer(parsed.timerId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async discardTimer(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = timerActionSchema.parse(req.body);
+      const data = await PlannerService.discardTimer(parsed.timerId);
+      res.json({ success: true, data });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // Schedule Editor Controller Endpoints
+  static async getSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const planId = (req.query.planId as string) || 'default';
+      const dayNumber = req.query.dayNumber ? parseInt(req.query.dayNumber as string, 10) : 1;
+      const plan = await PlannerService.getPlanById(planId);
+      const items = await PlannerService.getScheduleItems(plan._id.toString(), dayNumber);
+      res.json({ success: true, data: items });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async updateSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = batchUpdateScheduleSchema.parse(req.body);
+      const items = await PlannerService.saveScheduleItems(parsed.planId, parsed.dayNumber, parsed.items);
+      res.json({ success: true, data: items });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async importSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const parsed = importScheduleSchema.parse(req.body);
+      const items = await PlannerService.importScheduleFromCsv(parsed.planId, parsed.dayNumber, parsed.csvContent);
+      res.json({ success: true, data: items });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async exportSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const planId = (req.query.planId as string) || 'default';
+      const dayNumber = req.query.dayNumber ? parseInt(req.query.dayNumber as string, 10) : 1;
+      const plan = await PlannerService.getPlanById(planId);
+      const csv = await PlannerService.exportScheduleToCsv(plan._id.toString(), dayNumber);
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="study-schedule-day-${dayNumber}.csv"`);
+      res.send(csv);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  static async resetSchedule(req: Request, res: Response, next: NextFunction) {
+    try {
+      const planId = (req.body.planId as string) || 'default';
+      const dayNumber = req.body.dayNumber ? parseInt(req.body.dayNumber as string, 10) : 1;
+      const plan = await PlannerService.getPlanById(planId);
+      const items = await PlannerService.resetScheduleToDefaults(plan._id.toString(), dayNumber);
+      res.json({ success: true, data: items });
+    } catch (err) {
+      next(err);
+    }
   }
 }

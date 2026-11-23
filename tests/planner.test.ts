@@ -4,6 +4,8 @@ import { StudyPlan } from '../server/src/models/StudyPlan.js';
 import { StudyDayProgress } from '../server/src/models/StudyDayProgress.js';
 import { DSASession } from '../server/src/models/DSASession.js';
 import { StudyNote } from '../server/src/models/StudyNote.js';
+import { StudyScheduleItem } from '../server/src/models/StudyScheduleItem.js';
+import { ActivityTimerSession } from '../server/src/models/ActivityTimerSession.js';
 import { Subject } from '../server/src/models/Subject.js';
 import { Concept } from '../server/src/models/Concept.js';
 import { PlannerService } from '../server/src/services/planner.service.js';
@@ -65,10 +67,10 @@ describe('Study Planner Module & Shared Roadmap', () => {
   });
 
   describe('Timetable & Schedule Calculations', () => {
-    it('should calculate accurate timetable slots starting at 10:30 AM', () => {
+    it('should calculate accurate timetable slots starting at 10:30 AM with 60m lunch and 15m transitions', () => {
       const slots = calculateDailyTimetable(1, '10:30');
-      // 7 slots: react, lunch, dsa, afternoon, job-search, bigg-boss, valorant
-      expect(slots).toHaveLength(7);
+      // 9 slots: react, lunch, transition-dsa, dsa, transition-afternoon, afternoon, job-search, bigg-boss, valorant
+      expect(slots).toHaveLength(9);
 
       // Slot 1: React Session
       const reactSlot = slots[0];
@@ -77,37 +79,55 @@ describe('Study Planner Module & Shared Roadmap', () => {
       expect(reactSlot.maxPoints).toBe(2);
       expect(reactSlot.isScored).toBe(true);
 
-      // Slot 2: Lunch Break (35m)
+      // Slot 2: Lunch Break (60m)
       const lunchSlot = slots[1];
       expect(lunchSlot.id).toBe('lunch');
-      expect(lunchSlot.durationFormatted).toBe('35m');
+      expect(lunchSlot.durationMinutes).toBe(60);
+      expect(lunchSlot.durationFormatted).toBe('1h');
+      expect(lunchSlot.isBreakOrTransition).toBe(true);
       expect(lunchSlot.isScored).toBe(false);
 
-      // Slot 3: DSA Practice (90m)
-      const dsaSlot = slots[2];
+      // Slot 3: Post-lunch transition (15m)
+      const trans1Slot = slots[2];
+      expect(trans1Slot.id).toBe('transition-dsa');
+      expect(trans1Slot.durationMinutes).toBe(15);
+      expect(trans1Slot.durationFormatted).toBe('15m');
+      expect(trans1Slot.isBreakOrTransition).toBe(true);
+
+      // Slot 4: DSA Practice (90m)
+      const dsaSlot = slots[3];
       expect(dsaSlot.id).toBe('dsa');
+      expect(dsaSlot.durationMinutes).toBe(90);
       expect(dsaSlot.durationFormatted).toBe('1h 30m');
       expect(dsaSlot.maxPoints).toBe(3);
 
-      // Slot 4: Afternoon Activity (Day 1: Project Learning)
-      const afternoonSlot = slots[3];
+      // Slot 5: Post-DSA transition (15m)
+      const trans2Slot = slots[4];
+      expect(trans2Slot.id).toBe('transition-afternoon');
+      expect(trans2Slot.durationMinutes).toBe(15);
+      expect(trans2Slot.durationFormatted).toBe('15m');
+      expect(trans2Slot.isBreakOrTransition).toBe(true);
+
+      // Slot 6: Afternoon Activity (Day 1: Project Learning)
+      const afternoonSlot = slots[5];
       expect(afternoonSlot.id).toBe('afternoon');
       expect(afternoonSlot.name).toContain('Project Learning — 1 hour');
       expect(afternoonSlot.maxPoints).toBe(2);
 
-      // Slot 5: Job Search
-      const jobSlot = slots[4];
+      // Slot 7: Job Search
+      const jobSlot = slots[6];
       expect(jobSlot.id).toBe('job-search');
+      expect(jobSlot.isFlexible).toBe(true);
       expect(jobSlot.maxPoints).toBe(2);
 
-      // Slots 6 & 7: Personal Routine (Bigg Boss & Valorant)
-      const bbSlot = slots[5];
+      // Slots 8 & 9: Personal Routine (Bigg Boss & Valorant)
+      const bbSlot = slots[7];
       expect(bbSlot.id).toBe('bigg-boss');
       expect(bbSlot.startTimeFormatted).toBe('9:00 PM');
       expect(bbSlot.endTimeFormatted).toBe('10:00 PM');
       expect(bbSlot.isScored).toBe(false);
 
-      const valSlot = slots[6];
+      const valSlot = slots[8];
       expect(valSlot.id).toBe('valorant');
       expect(valSlot.startTimeFormatted).toBe('10:00 PM');
       expect(valSlot.endTimeFormatted).toBe('12:00 AM');
@@ -406,6 +426,138 @@ describe('Study Planner Module & Shared Roadmap', () => {
       expect(restoreResult.counts.studyDayProgress).toBeGreaterThanOrEqual(1);
       expect(restoreResult.counts.dsaSessions).toBeGreaterThanOrEqual(1);
       expect(restoreResult.counts.studyNotes).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should manage live stopwatch timers with pause, resume, finish and mutual exclusion', async () => {
+      const timerDate = '2026-11-25';
+
+      // 1. Start timer for 'you' on 'react'
+      const dayView1 = await PlannerService.startTimer({
+        planId: testPlanId,
+        date: timerDate,
+        profileId: 'you',
+        activityId: 'react',
+        activityName: 'React Session',
+      });
+
+      const reactSlot1 = dayView1.timetable.find(s => s.id === 'react');
+      expect(reactSlot1?.youTimer?.status).toBe('running');
+      const reactTimerId = reactSlot1?.youTimer?.timerId!;
+      expect(reactTimerId).toBeDefined();
+
+      // 2. Pause timer
+      const dayView2 = await PlannerService.pauseTimer(reactTimerId);
+      const reactSlot2 = dayView2.timetable.find(s => s.id === 'react');
+      expect(reactSlot2?.youTimer?.status).toBe('paused');
+
+      // 3. Resume timer
+      const dayView3 = await PlannerService.resumeTimer(reactTimerId);
+      const reactSlot3 = dayView3.timetable.find(s => s.id === 'react');
+      expect(reactSlot3?.youTimer?.status).toBe('running');
+
+      // 4. Starting another timer for 'you' (e.g. 'dsa') should auto-pause 'react'
+      const dayView4 = await PlannerService.startTimer({
+        planId: testPlanId,
+        date: timerDate,
+        profileId: 'you',
+        activityId: 'dsa',
+        activityName: 'DSA Session',
+      });
+
+      const reactSlot4 = dayView4.timetable.find(s => s.id === 'react');
+      const dsaSlot4 = dayView4.timetable.find(s => s.id === 'dsa');
+      expect(reactSlot4?.youTimer?.status).toBe('paused');
+      expect(dsaSlot4?.youTimer?.status).toBe('running');
+      const dsaTimerId = dsaSlot4?.youTimer?.timerId!;
+      expect(dsaTimerId).toBeDefined();
+
+      // 5. Girlfriend can independently start her own 'react' timer without interfering
+      const dayViewGf = await PlannerService.startTimer({
+        planId: testPlanId,
+        date: timerDate,
+        profileId: 'girlfriend',
+        activityId: 'react',
+        activityName: 'React Session',
+      });
+
+      const gfReact = dayViewGf.timetable.find(s => s.id === 'react');
+      expect(gfReact?.girlfriendTimer?.status).toBe('running');
+      // You's dsa timer is still running
+      const youDsa = dayViewGf.timetable.find(s => s.id === 'dsa');
+      expect(youDsa?.youTimer?.status).toBe('running');
+
+      // 6. Finish timer for 'you' on 'dsa' -> should auto-complete task and recalculate score
+      const dayViewFinish = await PlannerService.finishTimer(dsaTimerId);
+      const dsaSlotFinished = dayViewFinish.timetable.find(s => s.id === 'dsa');
+      expect(dsaSlotFinished?.youTimer?.status).toBe('completed');
+      expect(dsaSlotFinished?.youTimer?.actualFinishFormatted).toBeDefined();
+      expect(dayViewFinish.profiles.you.progress.dsaCompleted).toBe(true);
+    });
+
+    it('should manage custom schedule items, CSV import/export and reset to defaults', async () => {
+      // 1. Save custom schedule items
+      const customItems = [
+        {
+          activityId: 'react',
+          name: 'React Deep Dive',
+          activityType: 'react' as const,
+          durationMinutes: 90,
+          videoRuntimeMinutes: 60,
+          extraBufferMinutes: 30,
+          isScored: true,
+          maxPoints: 2,
+          order: 0,
+        },
+        {
+          activityId: 'lunch',
+          name: 'Healthy Lunch',
+          activityType: 'break' as const,
+          durationMinutes: 60,
+          isScored: false,
+          maxPoints: 0,
+          order: 1,
+        },
+        {
+          activityId: 'dsa',
+          name: 'Hard LeetCode Session',
+          activityType: 'dsa' as const,
+          durationMinutes: 90,
+          isScored: true,
+          maxPoints: 3,
+          order: 2,
+        },
+      ];
+
+      const saveResult = await PlannerService.saveScheduleItems(testPlanId, 1, customItems);
+      expect(saveResult.length).toBe(3);
+
+      // 2. Fetch schedule items
+      const fetchedItems = await PlannerService.getScheduleItems(testPlanId, 1);
+      expect(fetchedItems.length).toBe(3);
+      expect(fetchedItems[0].name).toBe('React Deep Dive');
+
+      // 3. Export CSV
+      const csvData = await PlannerService.exportScheduleToCsv(testPlanId, 1);
+      expect(csvData).toContain('Day,Activity,Activity Type,Video Runtime,Extra Buffer,Duration,Target Profile,Is Scored,Max Points');
+      expect(csvData).toContain('React Deep Dive');
+
+      // 4. Import TSV (Excel paste simulation)
+      const tsvContent = `Day\tActivity\tActivity Type\tDuration\tVideo Runtime\tExtra Buffer\tTarget Profile
+1\tCustom React From Excel\treact\t100\t70\t30\tboth
+1\tBreak from Excel\tbreak\t45\t0\t0\tboth`;
+
+      const importResult = await PlannerService.importScheduleFromCsv(testPlanId, 1, tsvContent);
+      expect(importResult.length).toBe(2);
+
+      const itemsAfterImport = await PlannerService.getScheduleItems(testPlanId, 1);
+      expect(itemsAfterImport[0].name).toBe('Custom React From Excel');
+
+      // 5. Reset schedule to defaults
+      const resetResult = await PlannerService.resetScheduleToDefaults(testPlanId, 1);
+      expect(resetResult.length).toBe(9);
+
+      const itemsAfterReset = await StudyScheduleItem.find({ planId: testPlanId, dayNumber: 1 });
+      expect(itemsAfterReset.length).toBe(9);
     });
   });
 });

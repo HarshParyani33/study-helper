@@ -4,6 +4,8 @@ import { StudyProfile, IStudyProfile } from '../models/StudyProfile.js';
 import { StudyDayProgress, IStudyDayProgress } from '../models/StudyDayProgress.js';
 import { DSASession, IDSASession } from '../models/DSASession.js';
 import { StudyNote, IStudyNote } from '../models/StudyNote.js';
+import { ActivityTimerSession, IActivityTimerSession } from '../models/ActivityTimerSession.js';
+import { StudyScheduleItem, IStudyScheduleItem } from '../models/StudyScheduleItem.js';
 import { Concept } from '../models/Concept.js';
 import { Subject } from '../models/Subject.js';
 import { DSA_PATTERNS } from '../data/dsaQuestions.js';
@@ -11,6 +13,9 @@ import { REACT_EPISODES } from '../data/reactEpisodes.js';
 import {
   calculateDailyTimetable,
   calculateDailyScore,
+  formatDuration,
+  formatDurationDifference,
+  formatSecondsToStopwatch,
   TaskTimeSlot,
 } from '../utils/plannerCalculations.js';
 import { slugify } from '../utils/slugify.js';
@@ -169,7 +174,7 @@ export class PlannerService {
 
     progress.score = totalScore;
     progress.scoreBreakdown = breakdown;
-    progress.dsaCompleted = completedDSACount >= 2; // marked complete if target (2-3) reached
+    progress.dsaCompleted = Boolean(progress.dsaCompleted || completedDSACount >= 2); // marked complete if finished timer or target (2-3) reached
 
     await progress.save();
     return progress;
@@ -307,9 +312,103 @@ export class PlannerService {
     // Retrieve Notes for this date
     const notes = await StudyNote.find({ planId: plan._id, date }).sort({ createdAt: -1 }).lean();
 
-    // Calculate timetable slots based on selected start time
+    // Check for custom schedule items for this plan and day
+    const customItems = await StudyScheduleItem.find({ planId: plan._id, dayNumber: clampedDayNumber }).sort({ order: 1 }).lean();
     const effectiveStartTime = youProgress.startTime || plan.defaultStartTime || '10:30';
-    const timetableSlots = calculateDailyTimetable(clampedDayNumber, effectiveStartTime);
+    const rawSlots = calculateDailyTimetable(
+      clampedDayNumber,
+      effectiveStartTime,
+      customItems && customItems.length > 0 ? customItems : undefined
+    );
+
+    // Query timer sessions for this date
+    const timerSessions = await ActivityTimerSession.find({ planId: plan._id, date }).lean();
+
+    const now = new Date();
+    const currentTotalMin = now.getHours() * 60 + now.getMinutes();
+
+    const enrichedTimetable = rawSlots.map(slot => {
+      // You Timer
+      const youTimerDoc = timerSessions.find(t => t.profileId === 'you' && t.activityId === slot.id);
+      let youElapsed = 0;
+      let youStatus: 'idle' | 'running' | 'paused' | 'completed' = 'idle';
+      let youStartedAt: string | undefined;
+      let youFinishedAt: string | undefined;
+
+      if (youTimerDoc) {
+        youStatus = youTimerDoc.status as any;
+        youStartedAt = youTimerDoc.startedAt ? new Date(youTimerDoc.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
+        youFinishedAt = youTimerDoc.finishedAt ? new Date(youTimerDoc.finishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
+        if (youTimerDoc.status === 'running' && youTimerDoc.startedAt) {
+          youElapsed = Math.max(0, Math.floor((Date.now() - new Date(youTimerDoc.startedAt).getTime() - (youTimerDoc.totalPausedMs || 0)) / 1000));
+        } else if (youTimerDoc.status === 'paused' && youTimerDoc.startedAt && youTimerDoc.pausedAt) {
+          youElapsed = Math.max(0, Math.floor((new Date(youTimerDoc.pausedAt).getTime() - new Date(youTimerDoc.startedAt).getTime() - (youTimerDoc.totalPausedMs || 0)) / 1000));
+        } else if (youTimerDoc.status === 'completed') {
+          youElapsed = youTimerDoc.actualDurationSeconds || 0;
+        }
+      }
+      const youDiff = formatDurationDifference(youElapsed, slot.durationMinutes);
+
+      // Girlfriend Timer
+      const gfTimerDoc = timerSessions.find(t => t.profileId === 'girlfriend' && t.activityId === slot.id);
+      let gfElapsed = 0;
+      let gfStatus: 'idle' | 'running' | 'paused' | 'completed' = 'idle';
+      let gfStartedAt: string | undefined;
+      let gfFinishedAt: string | undefined;
+
+      if (gfTimerDoc) {
+        gfStatus = gfTimerDoc.status as any;
+        gfStartedAt = gfTimerDoc.startedAt ? new Date(gfTimerDoc.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
+        gfFinishedAt = gfTimerDoc.finishedAt ? new Date(gfTimerDoc.finishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
+        if (gfTimerDoc.status === 'running' && gfTimerDoc.startedAt) {
+          gfElapsed = Math.max(0, Math.floor((Date.now() - new Date(gfTimerDoc.startedAt).getTime() - (gfTimerDoc.totalPausedMs || 0)) / 1000));
+        } else if (gfTimerDoc.status === 'paused' && gfTimerDoc.startedAt && gfTimerDoc.pausedAt) {
+          gfElapsed = Math.max(0, Math.floor((new Date(gfTimerDoc.pausedAt).getTime() - new Date(gfTimerDoc.startedAt).getTime() - (gfTimerDoc.totalPausedMs || 0)) / 1000));
+        } else if (gfTimerDoc.status === 'completed') {
+          gfElapsed = gfTimerDoc.actualDurationSeconds || 0;
+        }
+      }
+      const gfDiff = formatDurationDifference(gfElapsed, slot.durationMinutes);
+
+      const isCurrent = !slot.isFlexible && currentTotalMin >= slot.startTimeMinutes && currentTotalMin < slot.endTimeMinutes;
+      const isPast = !slot.isFlexible && currentTotalMin >= slot.endTimeMinutes;
+
+      return {
+        ...slot,
+        isCurrent,
+        isPast,
+        youTimer: {
+          timerId: youTimerDoc ? youTimerDoc._id.toString() : undefined,
+          status: youStatus,
+          elapsedSeconds: youElapsed,
+          elapsedFormatted: formatSecondsToStopwatch(youElapsed),
+          actualDurationFormatted: youTimerDoc?.actualDurationFormatted || (youElapsed > 0 ? formatDuration(Math.round(youElapsed / 60)) : '—'),
+          actualStartFormatted: youStartedAt,
+          actualFinishFormatted: youFinishedAt,
+          diffFormatted: youDiff.formatted,
+          isOvertime: youDiff.isOvertime,
+          diffStatus: youDiff.status,
+        },
+        girlfriendTimer: {
+          timerId: gfTimerDoc ? gfTimerDoc._id.toString() : undefined,
+          status: gfStatus,
+          elapsedSeconds: gfElapsed,
+          elapsedFormatted: formatSecondsToStopwatch(gfElapsed),
+          actualDurationFormatted: gfTimerDoc?.actualDurationFormatted || (gfElapsed > 0 ? formatDuration(Math.round(gfElapsed / 60)) : '—'),
+          actualStartFormatted: gfStartedAt,
+          actualFinishFormatted: gfFinishedAt,
+          diffFormatted: gfDiff.formatted,
+          isOvertime: gfDiff.isOvertime,
+          diffStatus: gfDiff.status,
+        },
+      };
+    });
+
+    const totalPlannedMinutes = enrichedTimetable
+      .filter(s => !s.isBreakOrTransition && !s.isFlexible)
+      .reduce((sum, s) => sum + s.durationMinutes, 0);
+
+    const currentActivity = enrichedTimetable.find(s => s.isCurrent) || null;
 
     // Recalculate fresh scores
     const refreshedYou = await this.recalculateScoreForDay(plan._id as any, date, 'you');
@@ -348,7 +447,18 @@ export class PlannerService {
           percentage: maxPossiblePlanScore > 0 ? Math.round((gfTotalScore / maxPossiblePlanScore) * 100) : 0,
         },
       },
-      timetable: timetableSlots,
+      timetable: enrichedTimetable,
+      totalPlannedMinutes,
+      totalPlannedFormatted: formatDuration(totalPlannedMinutes),
+      currentActivity: currentActivity
+        ? {
+            id: currentActivity.id,
+            name: currentActivity.name,
+            startTimeFormatted: currentActivity.startTimeFormatted,
+            endTimeFormatted: currentActivity.endTimeFormatted,
+            durationFormatted: currentActivity.durationFormatted,
+          }
+        : null,
       startTime: effectiveStartTime,
       profiles: {
         you: {
@@ -592,5 +702,335 @@ export class PlannerService {
    */
   static getDSATopics() {
     return DSA_PATTERNS;
+  }
+
+  // ----------------------------------------------------
+  // Live Timer / Stopwatch Engine
+  // ----------------------------------------------------
+
+  /**
+   * Start stopwatch timer for a profile and activity.
+   * Auto-pauses any other running timer for the same profile to prevent concurrent running timers.
+   */
+  static async startTimer(params: {
+    planId: string;
+    date: string;
+    profileId: 'you' | 'girlfriend';
+    activityId: string;
+    activityName: string;
+  }) {
+    // 1. Prevent concurrent running timers for the same profile: pause any other running timer
+    const runningTimers = await ActivityTimerSession.find({
+      planId: params.planId,
+      date: params.date,
+      profileId: params.profileId,
+      activityId: { $ne: params.activityId },
+      status: 'running',
+    });
+    for (const rt of runningTimers) {
+      rt.status = 'paused';
+      rt.pausedAt = new Date();
+      await rt.save();
+    }
+
+    // 2. Find or create session for this activity
+    let session = await ActivityTimerSession.findOne({
+      planId: params.planId,
+      date: params.date,
+      profileId: params.profileId,
+      activityId: params.activityId,
+    });
+
+    if (!session) {
+      session = new ActivityTimerSession({
+        planId: params.planId,
+        date: params.date,
+        profileId: params.profileId,
+        activityId: params.activityId,
+        activityName: params.activityName,
+        status: 'running',
+        startedAt: new Date(),
+        totalPausedMs: 0,
+      });
+    } else {
+      if (session.status === 'paused' && session.pausedAt) {
+        session.totalPausedMs = (session.totalPausedMs || 0) + (Date.now() - session.pausedAt.getTime());
+        session.pausedAt = undefined;
+      } else if (session.status === 'idle' || session.status === 'completed') {
+        session.startedAt = new Date();
+        session.pausedAt = undefined;
+        session.totalPausedMs = 0;
+        session.finishedAt = undefined;
+      }
+      session.status = 'running';
+    }
+
+    await session.save();
+    return this.getDailyStudyView(params.planId, params.date);
+  }
+
+  /**
+   * Pause stopwatch timer.
+   */
+  static async pauseTimer(timerId: string) {
+    const session = await ActivityTimerSession.findById(timerId);
+    if (!session) throw new AppError('Timer session not found', 404);
+    if (session.status === 'running') {
+      session.status = 'paused';
+      session.pausedAt = new Date();
+      await session.save();
+    }
+    return this.getDailyStudyView(session.planId.toString(), session.date);
+  }
+
+  /**
+   * Resume stopwatch timer.
+   */
+  static async resumeTimer(timerId: string) {
+    const session = await ActivityTimerSession.findById(timerId);
+    if (!session) throw new AppError('Timer session not found', 404);
+
+    // Pause any other running timer for this profile first
+    await ActivityTimerSession.updateMany(
+      {
+        _id: { $ne: session._id },
+        planId: session.planId,
+        date: session.date,
+        profileId: session.profileId,
+        status: 'running',
+      },
+      {
+        $set: { status: 'paused', pausedAt: new Date() },
+      }
+    );
+
+    if (session.status === 'paused' && session.pausedAt) {
+      session.totalPausedMs = (session.totalPausedMs || 0) + (Date.now() - session.pausedAt.getTime());
+      session.pausedAt = undefined;
+      session.status = 'running';
+      await session.save();
+    } else if (session.status === 'idle') {
+      session.startedAt = new Date();
+      session.status = 'running';
+      await session.save();
+    }
+    return this.getDailyStudyView(session.planId.toString(), session.date);
+  }
+
+  /**
+   * Finish stopwatch timer, record actual end timestamp & duration, and mark task completed.
+   */
+  static async finishTimer(timerId: string) {
+    const session = await ActivityTimerSession.findById(timerId);
+    if (!session) throw new AppError('Timer session not found', 404);
+
+    const now = new Date();
+    session.finishedAt = now;
+
+    let totalMs = 0;
+    if (session.startedAt) {
+      if (session.status === 'paused' && session.pausedAt) {
+        totalMs = session.pausedAt.getTime() - session.startedAt.getTime() - (session.totalPausedMs || 0);
+      } else {
+        totalMs = now.getTime() - session.startedAt.getTime() - (session.totalPausedMs || 0);
+      }
+    }
+    const totalSec = Math.max(0, Math.floor(totalMs / 1000));
+    session.actualDurationSeconds = totalSec;
+    session.actualDurationFormatted = formatDuration(Math.round(totalSec / 60));
+    session.status = 'completed';
+    await session.save();
+
+    // Auto mark activity completed in StudyDayProgress
+    const taskMap: Record<string, string> = {
+      react: 'reactCompleted',
+      dsa: 'dsaCompleted',
+      afternoon: 'afternoonCompleted',
+      'job-search': 'jobSearchCompleted',
+    };
+    const taskKey = taskMap[session.activityId];
+    if (taskKey) {
+      await this.updateTaskProgress({
+        planId: session.planId.toString(),
+        date: session.date,
+        profileId: session.profileId,
+        taskKey: taskKey as any,
+        completed: true,
+      });
+    }
+
+    return this.getDailyStudyView(session.planId.toString(), session.date);
+  }
+
+  /**
+   * Discard timer session and reset to idle.
+   */
+  static async discardTimer(timerId: string) {
+    const session = await ActivityTimerSession.findById(timerId);
+    if (!session) throw new AppError('Timer session not found', 404);
+    session.status = 'idle';
+    session.startedAt = undefined;
+    session.pausedAt = undefined;
+    session.totalPausedMs = 0;
+    session.finishedAt = undefined;
+    session.actualDurationSeconds = 0;
+    session.actualDurationFormatted = '—';
+    await session.save();
+    return this.getDailyStudyView(session.planId.toString(), session.date);
+  }
+
+  // ----------------------------------------------------
+  // Excel-like Schedule Spreadsheet Editor
+  // ----------------------------------------------------
+
+  /**
+   * Get schedule items for a plan and day number.
+   */
+  static async getScheduleItems(planId: string, dayNumber: number) {
+    let items = await StudyScheduleItem.find({ planId, dayNumber }).sort({ order: 1 });
+    if (!items || items.length === 0) {
+      const defaultSlots = calculateDailyTimetable(dayNumber, '10:30');
+      items = [];
+      for (let i = 0; i < defaultSlots.length; i++) {
+        const slot = defaultSlots[i];
+        const doc = await StudyScheduleItem.create({
+          planId,
+          dayNumber,
+          order: i + 1,
+          activityId: slot.id,
+          name: slot.name,
+          activityType: slot.category,
+          targetProfile: 'both',
+          videoUrl: slot.videoUrl || '',
+          videoRuntimeMinutes: slot.videoRuntimeMinutes || 0,
+          extraBufferMinutes: slot.extraBufferMinutes || 0,
+          durationMinutes: slot.durationMinutes,
+          isFlexible: !!slot.isFlexible,
+          isScored: slot.isScored,
+          maxPoints: slot.maxPoints,
+        });
+        items.push(doc);
+      }
+    }
+    return items;
+  }
+
+  /**
+   * Save edited schedule items for a plan and day number.
+   */
+  static async saveScheduleItems(planId: string, dayNumber: number, items: any[]) {
+    await StudyScheduleItem.deleteMany({ planId, dayNumber });
+    const saved = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      let dur = it.durationMinutes;
+      if (!dur || dur <= 0) {
+        if (it.videoRuntimeMinutes) {
+          dur = it.videoRuntimeMinutes + (it.extraBufferMinutes || 30);
+        } else {
+          dur = 60;
+        }
+      }
+
+      const doc = await StudyScheduleItem.create({
+        planId,
+        dayNumber,
+        order: i + 1,
+        activityId: it.activityId || `activity-${Date.now()}-${i}`,
+        name: it.name,
+        activityType: it.activityType || 'custom',
+        targetProfile: it.targetProfile || 'both',
+        videoUrl: it.videoUrl || '',
+        videoRuntimeMinutes: it.videoRuntimeMinutes || 0,
+        extraBufferMinutes: it.extraBufferMinutes || 0,
+        durationMinutes: dur,
+        isFlexible: !!it.isFlexible,
+        isScored: !!it.isScored,
+        maxPoints: it.maxPoints || 0,
+        notes: it.notes || '',
+      });
+      saved.push(doc);
+    }
+    return saved;
+  }
+
+  /**
+   * Import schedule from CSV or TSV (e.g. pasted from Excel / Google Sheets).
+   */
+  static async importScheduleFromCsv(planId: string, dayNumber: number, rawContent: string) {
+    const lines = rawContent.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length < 2) {
+      throw new AppError('Imported content must contain a header and at least one data row', 400);
+    }
+
+    const isTab = lines[0].includes('\t');
+    const separator = isTab ? '\t' : ',';
+    const header = lines[0].split(separator).map(h => h.trim().toLowerCase().replace(/[\s_]+/g, ''));
+
+    const activityIdx = header.findIndex(h => h.includes('activity') || h.includes('name') || h.includes('title'));
+    if (activityIdx === -1) {
+      throw new AppError('Missing required column: Activity / Name', 400);
+    }
+
+    const typeIdx = header.findIndex(h => h.includes('type') || h.includes('category'));
+    const durationIdx = header.findIndex(h => h.includes('duration') || h.includes('time') || h.includes('minutes'));
+    const runtimeIdx = header.findIndex(h => h.includes('runtime') || h.includes('video'));
+    const bufferIdx = header.findIndex(h => h.includes('buffer') || h.includes('extra'));
+    const profileIdx = header.findIndex(h => h.includes('profile') || h.includes('target'));
+
+    const items: any[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(separator).map(p => p.trim());
+      if (!parts[activityIdx]) continue;
+
+      const name = parts[activityIdx];
+      const actType = (typeIdx !== -1 && parts[typeIdx]) ? parts[typeIdx].toLowerCase() : 'custom';
+      const videoRuntime = (runtimeIdx !== -1 && parts[runtimeIdx]) ? parseInt(parts[runtimeIdx], 10) || 0 : 0;
+      const extraBuffer = (bufferIdx !== -1 && parts[bufferIdx]) ? parseInt(parts[bufferIdx], 10) || 0 : (videoRuntime > 0 ? 30 : 0);
+      let dur = (durationIdx !== -1 && parts[durationIdx]) ? parseInt(parts[durationIdx], 10) || 0 : 0;
+      if (dur <= 0) {
+        dur = videoRuntime > 0 ? videoRuntime + extraBuffer : 60;
+      }
+      const targetProfile = (profileIdx !== -1 && parts[profileIdx]) ? parts[profileIdx].toLowerCase() : 'both';
+
+      items.push({
+        activityId: `imported-${i}`,
+        name,
+        activityType: ['react', 'break', 'transition', 'dsa', 'system-design', 'project-learning', 'job-search', 'personal', 'custom'].includes(actType) ? actType : 'custom',
+        targetProfile: ['both', 'you', 'girlfriend'].includes(targetProfile) ? targetProfile : 'both',
+        videoRuntimeMinutes: videoRuntime,
+        extraBufferMinutes: extraBuffer,
+        durationMinutes: dur,
+        isFlexible: actType === 'job-search',
+        isScored: ['react', 'dsa', 'system-design', 'project-learning', 'job-search'].includes(actType),
+        maxPoints: actType === 'dsa' ? 3 : (['react', 'system-design', 'project-learning', 'job-search'].includes(actType) ? 2 : 0),
+      });
+    }
+
+    if (items.length === 0) {
+      throw new AppError('No valid activity rows found in imported data', 400);
+    }
+
+    return this.saveScheduleItems(planId, dayNumber, items);
+  }
+
+  /**
+   * Export schedule items as CSV.
+   */
+  static async exportScheduleToCsv(planId: string, dayNumber: number): Promise<string> {
+    const items = await this.getScheduleItems(planId, dayNumber);
+    const header = 'Day,Activity,Activity Type,Video Runtime,Extra Buffer,Duration,Target Profile,Is Scored,Max Points\n';
+    const rows = items.map(it => {
+      return `${dayNumber},"${it.name}",${it.activityType},${it.videoRuntimeMinutes || 0},${it.extraBufferMinutes || 0},${it.durationMinutes},${it.targetProfile},${it.isScored},${it.maxPoints}`;
+    });
+    return header + rows.join('\n');
+  }
+
+  /**
+   * Reset schedule to default calculated template.
+   */
+  static async resetScheduleToDefaults(planId: string, dayNumber: number) {
+    await StudyScheduleItem.deleteMany({ planId, dayNumber });
+    return this.getScheduleItems(planId, dayNumber);
   }
 }

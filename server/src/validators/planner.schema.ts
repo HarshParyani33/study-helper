@@ -59,3 +59,44 @@ export const convertNoteToConceptSchema = z.object({
   importance: z.enum(['low', 'medium', 'high']).default('high'),
   difficulty: z.enum(['easy', 'medium', 'hard']).default('medium'),
 });
+
+// Timer Schemas
+export const startTimerSchema = z.object({
+  planId: z.string().min(1),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  profileId: z.enum(['you', 'girlfriend']),
+  activityId: z.string().min(1),
+  activityName: z.string().min(1),
+});
+
+export const timerActionSchema = z.object({
+  timerId: z.string().min(1),
+});
+
+// Schedule Editor Schemas
+export const scheduleItemSchema = z.object({
+  activityId: z.string().min(1),
+  name: z.string().min(1),
+  activityType: z.enum(['react', 'break', 'transition', 'dsa', 'afternoon', 'system-design', 'project-learning', 'job-search', 'personal', 'custom']),
+  targetProfile: z.enum(['both', 'you', 'girlfriend']).default('both'),
+  videoUrl: z.string().optional().default(''),
+  videoRuntimeMinutes: z.number().int().min(0).default(0),
+  extraBufferMinutes: z.number().int().min(0).default(0),
+  durationMinutes: z.number().int().min(1).default(60),
+  isFlexible: z.boolean().default(false),
+  isScored: z.boolean().default(false),
+  maxPoints: z.number().int().min(0).default(0),
+  notes: z.string().optional().default(''),
+});
+
+export const batchUpdateScheduleSchema = z.object({
+  planId: z.string().min(1),
+  dayNumber: z.number().int().min(1),
+  items: z.array(scheduleItemSchema),
+});
+
+export const importScheduleSchema = z.object({
+  planId: z.string().min(1),
+  dayNumber: z.number().int().min(1),
+  csvContent: z.string().min(1),
+});

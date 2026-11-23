@@ -204,21 +204,58 @@ export interface ProfileDailyProgress {
   };
 }
 
+export interface TaskTimerInfo {
+  timerId?: string;
+  status: 'idle' | 'running' | 'paused' | 'completed';
+  elapsedSeconds: number;
+  elapsedFormatted: string; // e.g. "00:34:21"
+  actualDurationFormatted: string; // e.g. "1h 33m"
+  actualStartFormatted?: string;
+  actualFinishFormatted?: string;
+  diffFormatted: string; // e.g. "+3m" or "-5m" or "On time"
+  isOvertime: boolean;
+  diffStatus: 'under' | 'equal' | 'over';
+}
+
 export interface TaskTimeSlot {
-  title: string;
-  category: 'react' | 'lunch' | 'dsa' | 'afternoon' | 'job_search' | 'personal';
-  startTime: string;
-  endTime: string;
+  id: string;
+  name: string;
+  category: 'react' | 'break' | 'transition' | 'dsa' | 'afternoon' | 'job-search' | 'personal' | 'custom';
+  startTimeFormatted: string;
+  endTimeFormatted: string;
+  startTimeMinutes: number;
+  endTimeMinutes: number;
   durationMinutes: number;
-  description?: string;
-  link?: string;
-  episodeNumber?: number;
-  runtimeMinutes?: number;
-  totalStudyMinutes?: number;
-  activityName?: string;
-  note?: string;
+  durationFormatted: string;
+  isBreakOrTransition: boolean;
   isScored: boolean;
-  points: number;
+  maxPoints: number;
+  isFlexible?: boolean;
+  targetMissed5PM?: boolean;
+  videoUrl?: string;
+  videoRuntimeMinutes?: number;
+  extraBufferMinutes?: number;
+  details?: any;
+  isCurrent?: boolean;
+  isPast?: boolean;
+  youTimer?: TaskTimerInfo;
+  girlfriendTimer?: TaskTimerInfo;
+}
+
+export interface ScheduleItemData {
+  _id?: string;
+  activityId: string;
+  name: string;
+  activityType: 'react' | 'break' | 'transition' | 'dsa' | 'system-design' | 'project-learning' | 'job-search' | 'personal' | 'custom';
+  targetProfile: 'both' | 'you' | 'girlfriend';
+  videoUrl?: string;
+  videoRuntimeMinutes?: number;
+  extraBufferMinutes?: number;
+  durationMinutes: number;
+  isFlexible?: boolean;
+  isScored?: boolean;
+  maxPoints?: number;
+  notes?: string;
 }
 
 export interface StudyNoteData {
@@ -255,6 +292,15 @@ export interface DayStudyView {
     girlfriend: { totalScore: number; maxScore: number; percentage: number };
   };
   timetable: TaskTimeSlot[];
+  totalPlannedMinutes: number;
+  totalPlannedFormatted: string;
+  currentActivity: {
+    id: string;
+    name: string;
+    startTimeFormatted: string;
+    endTimeFormatted: string;
+    durationFormatted: string;
+  } | null;
   startTime: string;
   profiles: {
     you: ProfileDailyProgress;

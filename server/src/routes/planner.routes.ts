@@ -17,6 +17,20 @@ router.get('/daily', PlannerController.getDailyView);
 router.post('/task-progress', PlannerController.updateTaskProgress);
 router.post('/dsa-session', PlannerController.updateDSASession);
 
+// Live Timers
+router.post('/timer/start', PlannerController.startTimer);
+router.post('/timer/pause', PlannerController.pauseTimer);
+router.post('/timer/resume', PlannerController.resumeTimer);
+router.post('/timer/finish', PlannerController.finishTimer);
+router.post('/timer/discard', PlannerController.discardTimer);
+
+// Schedule Spreadsheet Editor
+router.get('/schedule', PlannerController.getSchedule);
+router.put('/schedule', PlannerController.updateSchedule);
+router.post('/schedule/import', PlannerController.importSchedule);
+router.get('/schedule/export', PlannerController.exportSchedule);
+router.post('/schedule/reset', PlannerController.resetSchedule);
+
 // Notes
 router.get('/notes', PlannerController.getNotes);
 router.post('/notes', PlannerController.createNote);
